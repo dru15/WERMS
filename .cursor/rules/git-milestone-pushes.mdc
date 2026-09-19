@@ -1,0 +1,13 @@
+---
+description: Prompt for GitHub pushes only when meaningful project changes have accumulated
+alwaysApply: true
+---
+
+# Milestone Git Pushes
+
+- Do not prompt to push after small, isolated, cosmetic, or work-in-progress changes.
+- Let related changes accumulate into a coherent, verified milestone.
+- Treat new features, architectural changes, database migrations, ML model updates, security fixes, deployment changes, and substantial documentation baselines as major changes.
+- After a major change is complete and relevant checks pass, ask the user whether they want it committed and pushed to GitHub.
+- Summarize what would be included before asking.
+- Never push automatically unless the user explicitly authorizes that push.
