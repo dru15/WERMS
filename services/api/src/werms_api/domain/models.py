@@ -34,6 +34,7 @@ class RoadEdge:
     predictive_risk: float = 0.0
     congestion: float = 0.0
     hard_blocked: bool = False
+    way_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -87,4 +88,3 @@ class RoutePlan:
 
 class NoSafeRouteError(RuntimeError):
     """Raised when every shelter candidate violates current constraints."""
-

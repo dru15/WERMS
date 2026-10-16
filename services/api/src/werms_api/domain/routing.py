@@ -18,15 +18,6 @@ from werms_api.domain.models import (
 )
 
 
-def _distance_km(a: RoadNode, b: RoadNode) -> float:
-    lat_scale = 111.32
-    mean_latitude = math.radians((a.point.latitude + b.point.latitude) / 2)
-    lon_scale = 111.32 * math.cos(mean_latitude)
-    latitude_delta = (a.point.latitude - b.point.latitude) * lat_scale
-    longitude_delta = (a.point.longitude - b.point.longitude) * lon_scale
-    return math.hypot(latitude_delta, longitude_delta)
-
-
 def _edge_cost(
     edge: RoadEdge,
     *,
@@ -42,7 +33,7 @@ def _edge_cost(
         + weights.live_hazard * edge.live_risk
         + weights.predictive_risk * edge.predictive_risk
         + weights.congestion * edge.congestion
-        + weights.data_age * bounded_age
+        + weights.data_age * bounded_age * edge.distance_km
     )
 
 
@@ -55,24 +46,55 @@ def _astar(
     hazard: HazardState,
     now: datetime,
     weights: CostWeights,
+    turn_restrictions: tuple[dict, ...] = (),
 ) -> tuple[tuple[str, ...], tuple[RoadEdge, ...], float] | None:
     adjacency: dict[str, list[RoadEdge]] = defaultdict(list)
     for edge in edges:
         adjacency[edge.source].append(edge)
 
+    rules: dict[str, list[dict]] = defaultdict(list)
+    for rule in turn_restrictions:
+        rules[rule["via"]].append(rule)
+    way_by_edge = {edge.edge_id: edge.way_id for group in adjacency.values() for edge in group}
     data_age_minutes = max(0.0, (now - hazard.source_timestamp).total_seconds() / 60.0)
-    queue: list[tuple[float, float, str]] = [(0.0, 0.0, origin_node_id)]
-    came_from: dict[str, tuple[str, RoadEdge]] = {}
-    best_cost = {origin_node_id: 0.0}
+    start = (origin_node_id, "")
+    queue: list[tuple[float, str, str]] = [(0.0, *start)]
+    came_from: dict[tuple[str, str], tuple[tuple[str, str], RoadEdge]] = {}
+    best_cost = {start: 0.0}
+    destination = None
 
     while queue:
-        _, current_cost, current = heapq.heappop(queue)
-        if current == destination_node_id:
-            break
-        if current_cost > best_cost.get(current, math.inf):
+        current_cost, current, incoming_edge = heapq.heappop(queue)
+        state = (current, incoming_edge)
+        if current_cost > best_cost.get(state, math.inf):
             continue
+        if current == destination_node_id:
+            destination = state
+            break
 
         for edge in adjacency[current]:
+            forbidden = False
+            for rule in rules[current]:
+                if way_by_edge.get(incoming_edge) != rule["from_way"]:
+                    continue
+                restriction = rule["restriction"]
+                to_way_matches = edge.way_id == rule["to_way"]
+                if restriction in {"no_u_turn", "only_u_turn"}:
+                    to_way_matches = to_way_matches and edge.edge_id == incoming_edge
+                elif (
+                    restriction == "no_straight_on"
+                    and rule["from_way"] == rule["to_way"]
+                    or restriction == "only_straight_on"
+                    and rule["from_way"] == rule["to_way"]
+                ):
+                    to_way_matches = to_way_matches and edge.edge_id != incoming_edge
+                if (restriction.startswith("no_") and to_way_matches) or (
+                    restriction.startswith("only_") and not to_way_matches
+                ):
+                    forbidden = True
+                    break
+            if forbidden:
+                continue
             cost = _edge_cost(
                 edge,
                 hard_blocked=edge.edge_id in hazard.blocked_edge_ids,
@@ -82,27 +104,28 @@ def _astar(
             if math.isinf(cost):
                 continue
             candidate_cost = current_cost + cost
-            if candidate_cost >= best_cost.get(edge.target, math.inf):
+            next_state = (edge.target, edge.edge_id)
+            if candidate_cost >= best_cost.get(next_state, math.inf):
                 continue
-            best_cost[edge.target] = candidate_cost
-            came_from[edge.target] = (current, edge)
-            heuristic = _distance_km(nodes[edge.target], nodes[destination_node_id])
-            heapq.heappush(queue, (candidate_cost + heuristic, candidate_cost, edge.target))
+            best_cost[next_state] = candidate_cost
+            came_from[next_state] = (state, edge)
+            # A zero heuristic is admissible for all travel-time graphs.
+            heapq.heappush(queue, (candidate_cost, *next_state))
 
-    if destination_node_id not in best_cost:
+    if destination is None:
         return None
 
     node_path = [destination_node_id]
     edge_path: list[RoadEdge] = []
-    cursor = destination_node_id
-    while cursor != origin_node_id:
+    cursor = destination
+    while cursor != start:
         previous, edge = came_from[cursor]
-        node_path.append(previous)
+        node_path.append(previous[0])
         edge_path.append(edge)
         cursor = previous
     node_path.reverse()
     edge_path.reverse()
-    return tuple(node_path), tuple(edge_path), best_cost[destination_node_id]
+    return tuple(node_path), tuple(edge_path), best_cost[destination]
 
 
 def calculate_safe_route(
@@ -115,16 +138,20 @@ def calculate_safe_route(
     redirect_threshold: float,
     now: datetime | None = None,
     weights: CostWeights | None = None,
+    party_size: int = 1,
+    turn_restrictions: tuple[dict, ...] = (),
 ) -> RoutePlan:
     now = now or datetime.now(UTC)
     weights = weights or CostWeights()
+    edges = tuple(edges)
     candidates: list[RoutePlan] = []
 
     for shelter in shelters:
         if (
             shelter.status is not ShelterStatus.OPEN
-            or shelter.free_capacity <= 0
-            or shelter.utilization >= redirect_threshold
+            or shelter.free_capacity < party_size
+            or (shelter.occupancy + shelter.reserved_demand + party_size) / shelter.capacity
+            > redirect_threshold
         ):
             continue
         result = _astar(
@@ -135,15 +162,16 @@ def calculate_safe_route(
             hazard=hazard,
             now=now,
             weights=weights,
+            turn_restrictions=turn_restrictions,
         )
         if result is None:
             continue
         node_ids, path_edges, route_cost = result
         distance = sum(edge.distance_km for edge in path_edges)
         estimated_minutes = sum(edge.travel_minutes for edge in path_edges)
-        risk_score = sum(
-            edge.live_risk + edge.predictive_risk for edge in path_edges
-        ) / max(len(path_edges), 1)
+        risk_score = sum(edge.live_risk + edge.predictive_risk for edge in path_edges) / max(
+            len(path_edges), 1
+        )
         shelter_penalty = 3.0 * shelter.utilization + 0.5 * shelter.reserved_demand
         reason_codes = ["HARD_HAZARDS_EXCLUDED", "CAPACITY_QUALIFIED_SHELTER"]
         if any(edge.live_risk > 0 for edge in path_edges):

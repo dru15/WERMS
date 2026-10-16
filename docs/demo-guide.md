@@ -1,0 +1,18 @@
+# WERMS end-to-end demonstration
+
+Start with `./scripts/dev.ps1` and open `http://localhost:5173`. The backend uses the existing local database; restarting does not reset the exercise. Keep another browser profile or private window for a second role. Use exercise descriptions rather than real emergency claims.
+
+1. Show the actual Pacific Palisades map, the pilot boundary, OpenStreetMap attribution, and the three mapped demonstration destinations. Click near a road to choose a start. Compare routes and point out actual street geometry, distance estimates, source version, and expiry. Map panning is global; route calculation outside the imported boundary is rejected.
+2. Change party size and compare destinations. Previews do not reserve spaces. Confirm one route; the reserved total changes. Reload the browser and show the booking restored. Copy its booking code for check-in; treat the code as private.
+3. Open Command centre. For first setup, unlock with the key in `data/operational/operator.key`. Create an administrator, dispatcher, and shelter account using distinct long passwords. Assign shelter staff to one site. Sign out and demonstrate the named dispatcher login. Browser refresh requires staff sign-in again.
+4. In Operations, select a segment on the active route to close it. Show the booking becoming invalid and its reserved demand released. Reopening does not revive it. Compare again and confirm the alternative. If every route is blocked, show the controlled no-route message rather than forcing a path.
+5. In Command centre, report an exercise incident with its source, observation time, priority, and optional affected road. Reporting alone does not close that road. Acknowledge the report and escalate it to critical if needed.
+6. Register an exercise resource, such as `Exercise Engine 1`. Dispatch it to the incident with instructions. Its status becomes deployed and it disappears from available choices. Acknowledge the assignment, complete it, then show the resource available again. Resolve the incident. Attempting resolution with an active assignment is rejected.
+7. In another profile, sign in as shelter staff. Only their assigned site's administration appears. Check in an active booking for that site and show reserved demand become occupancy once. Repeat check-in and show occupancy unchanged. Another site's booking is rejected.
+8. Demonstrate a site occupancy correction with a reason. Occupancy plus active reservations cannot exceed capacity. Restrict a site to stop new bookings, or close it to invalidate incoming bookings. Reopen it deliberately after the demonstration.
+9. Sign in as administrator and inspect the persistent audit trail, including actor, time, and mutation details. Disable the exercise staff account and show its session denied on the next request.
+10. Stop the API and show the browser's disconnected/unverified state. Restart it and show shared state recovered. Finally run `./scripts/verify.ps1` to show the automated checks and production build.
+
+For another demonstration, use new incident/resource names or a separate `OPERATIONAL_DB_PATH` configured before startup. Do not delete a database that contains state you want to retain. A different graph version requires migration or a separate database path.
+
+Be precise in the presentation: geography and roads are real; assembly-site capacities, closures, reports, and registered exercise inventory are operator-entered demonstration conditions. The application does not predict fire spread, ingest live satellite feeds, deliver radio messages, or certify emergency destinations. Patentability is not established by a working prototype.

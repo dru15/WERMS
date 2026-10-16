@@ -6,6 +6,9 @@
   "workspaces": [
     "apps/*"
   ],
+  "overrides": {
+    "source-map-js": "1.2.2"
+  },
   "scripts": {
     "dev:web": "npm run dev --workspace @werms/web",
     "build:web": "npm run build --workspace @werms/web",

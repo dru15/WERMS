@@ -20,6 +20,7 @@ dist/
 !.env.example
 data/raw/
 data/processed/
+data/operational/
 artifacts/models/
 tmp/
 

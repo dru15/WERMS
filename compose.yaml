@@ -2,6 +2,7 @@ name: werms
 
 services:
   db:
+    profiles: ["spatial"]
     image: postgis/postgis:16-3.5
     environment:
       POSTGRES_DB: werms
@@ -18,6 +19,7 @@ services:
       retries: 10
 
   redis:
+    profiles: ["spatial"]
     image: redis:7.4-alpine
     command: redis-server --appendonly yes
     ports:
@@ -38,13 +40,11 @@ services:
       DATABASE_URL: postgresql+asyncpg://werms:werms@db:5432/werms
       REDIS_URL: redis://redis:6379/0
       WEB_ORIGIN: http://localhost:5173
+      OPERATIONAL_DB_PATH: /app/data/operational/palisades.sqlite3
+    volumes:
+      - pilot-data:/app/data/operational
     ports:
       - "8000:8000"
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
 
   web:
     build:
@@ -58,6 +58,7 @@ services:
       - api
 
 volumes:
+  pilot-data:
   postgres-data:
   redis-data:
 

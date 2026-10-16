@@ -16,7 +16,10 @@ function Invoke-Checked {
 }
 
 Invoke-Checked { & ".\.venv\Scripts\python.exe" -m ruff check services/api }
-Invoke-Checked { & ".\.venv\Scripts\python.exe" -m pytest services/api/tests }
+$TestParent = Join-Path $ProjectRoot "tmp/verification"
+New-Item -ItemType Directory -Path $TestParent -Force | Out-Null
+$TestTemp = Join-Path $TestParent ([guid]::NewGuid().ToString("N"))
+Invoke-Checked { & ".\.venv\Scripts\python.exe" -m pytest services/api/tests --basetemp $TestTemp -p no:cacheprovider --tb=short }
 Invoke-Checked { & $Npm run lint:web }
 Invoke-Checked { & $Npm run test:web }
 Invoke-Checked { & $Npm run build:web }

@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,9 +23,10 @@ class Settings(BaseSettings):
     route_validity_seconds: int = Field(default=300, ge=30, le=3600)
     model_mode: Literal["disabled", "approved"] = "disabled"
     model_artifact_path: str = "artifacts/models/approved"
+    operational_db_path: str = "data/operational/palisades.sqlite3"
+    operator_api_key: SecretStr | None = None
 
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

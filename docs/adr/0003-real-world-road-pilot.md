@@ -1,0 +1,7 @@
+# Real-world map and bounded OSM routing
+
+Use Leaflet and interactive OpenStreetMap tiles for geographic display, plus a packaged bounded OpenStreetMap road extract as the backend's routing authority. A generic remote directions service would not respect WERMS's local closures and transactional booking snapshot; the imported graph makes rendered geometry, physical road IDs, one-way directions, and turn constraints consistent with those decisions.
+
+The first area is Pacific Palisades in Los Angeles, matching the project's earlier Los Angeles pilot context. Public road geometry and mapped landmark positions are real; incident closures, assembly capacity, occupancy, and travel times remain demonstration inputs. Do not present mapped landmarks as verified emergency shelters. Tile requests are ordinary viewport requests with visible attribution, normal browser caching, no bulk prefetch or offline tile download, and a configurable provider URL.
+
+The default real-pilot database is `data/operational/palisades.sqlite3`, separate from the earlier fictional pilot's file. Geometry changes require migration or an explicitly separate database path; they cannot reset active bookings implicitly. Turn-aware routing keeps the incoming physical edge in its search state. A freshness penalty is scaled by distance so arbitrary OSM shape-point density cannot change the freshness penalty for the same physical journey.

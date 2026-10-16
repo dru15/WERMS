@@ -1,65 +1,27 @@
-export type Coordinate = {
-  latitude: number;
-  longitude: number;
-};
-
-export type RoutePoint = Coordinate & {
-  node_id: string;
-};
-
+export type Coordinate = { latitude: number; longitude: number };
+export type RoutePoint = Coordinate & { node_id: string };
 export type Shelter = {
-  shelter_id: string;
-  name: string;
-  location: Coordinate;
-  capacity: number;
-  occupancy: number;
-  reserved_demand: number;
-  utilization: number;
-  status: string;
-  updated_at: string;
+  shelter_id: string; node_id: string; name: string; location: Coordinate;
+  capacity: number; occupancy: number; reserved_demand: number;
+  utilization: number; status: "open" | "restricted" | "closed"; updated_at: string;
 };
-
-export type Route = {
-  route_id: string;
-  status: "valid";
-  shelter: Shelter;
-  path: RoutePoint[];
-  edge_ids: string[];
-  distance_km: number;
-  estimated_minutes: number;
-  risk_score: number;
-  hazard_version: string;
-  road_version: string;
-  model_version: string | null;
-  model_mode: "disabled" | "approved";
-  hazard_source_timestamp: string;
-  created_at: string;
-  valid_until: string;
+export type RoutePreview = {
+  shelter: Shelter; path: RoutePoint[]; edge_ids: string[];
+  distance_km: number; estimated_minutes: number; risk_score: number;
+  hazard_version: string; road_version: string;
+  model_version: null; model_mode: "disabled";
+  hazard_source_timestamp: string; created_at: string; valid_until: string;
   reason_codes: string[];
 };
-
+export type Route = RoutePreview & {
+  route_id: string; status: "valid" | "invalid" | "expired" | "cancelled" | "arrived";
+  cause: string | null; party_size: number;
+};
 export type Hazard = {
-  version: string;
-  source_timestamp: string;
-  blocked_edge_ids: string[];
-  model_version: string | null;
-  model_mode: "disabled" | "approved";
+  version: string; source_timestamp: string; blocked_edge_ids: string[];
+  model_version: null; model_mode: "disabled";
 };
-
-export type SystemStatus = {
-  service: "werms-api";
-  environment: string;
-  operational_store: string;
-  model_mode: "disabled" | "approved";
-  hazard_version: string;
-  road_version: string;
-  websocket_clients: number;
+export type Snapshot = { hazard: Hazard; shelters: Shelter[]; revision: number };
+export type RouteInput = {
+  origin_node_id: string; party_size: number; traffic: boolean; shelter_id?: string;
 };
-
-export type HazardEvent = {
-  event: "hazard.updated" | "connected";
-  hazard_version: string;
-  newly_blocked_edge_id?: string;
-  invalidated_route_ids?: string[];
-};
-
