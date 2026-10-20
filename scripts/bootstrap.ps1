@@ -25,7 +25,8 @@ if (-not (Test-Path -LiteralPath ".venv")) {
 }
 
 Invoke-Checked { & ".\.venv\Scripts\python.exe" -m pip install --upgrade pip }
-Invoke-Checked { & ".\.venv\Scripts\python.exe" -m pip install -e ".\services\api[dev]" }
+Invoke-Checked { & ".\.venv\Scripts\python.exe" -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu }
+Invoke-Checked { & ".\.venv\Scripts\python.exe" -m pip install -e ".\services\api[dev,ml,spatial]" }
 Invoke-Checked { & $Npm install }
 
 Write-Host "WERMS environment is ready. Run .\scripts\dev.ps1"

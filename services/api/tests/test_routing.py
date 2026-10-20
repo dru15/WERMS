@@ -1,7 +1,7 @@
+import random
 from datetime import UTC, datetime
 
 import pytest
-
 from werms_api.domain.models import (
     CostWeights,
     HazardState,
@@ -11,7 +11,7 @@ from werms_api.domain.models import (
     RoadNode,
     Shelter,
 )
-from werms_api.domain.routing import _edge_cost, calculate_safe_route
+from werms_api.domain.routing import _astar, _edge_cost, calculate_safe_route
 from werms_api.store import DemoStore
 
 
@@ -104,7 +104,60 @@ def test_geographic_distance_does_not_override_minimum_travel_time():
 
 def test_freshness_penalty_does_not_depend_on_osm_shape_point_density():
     weights = CostWeights()
-    long_edge = RoadEdge("long", "a", "b", 1, 2)
-    short_edge = RoadEdge("short", "a", "b", 0.1, 0.2)
+    long_edge = RoadEdge("long", "a", "b", 1, 2, live_risk=0.3, predictive_risk=0.7)
+    short_edge = RoadEdge("short", "a", "b", 0.1, 0.2, live_risk=0.3, predictive_risk=0.7)
     kwargs = {"hard_blocked": False, "data_age_minutes": 30, "weights": weights}
     assert _edge_cost(long_edge, **kwargs) == pytest.approx(10 * _edge_cost(short_edge, **kwargs))
+
+
+def test_astar_matches_exhaustive_optimum_on_geographically_misleading_graphs():
+    rng = random.Random(41)
+    now = datetime.now(UTC)
+    for _ in range(50):
+        nodes = {
+            str(i): RoadNode(str(i), Point(rng.uniform(-70, 70), rng.uniform(-170, 170)))
+            for i in range(7)
+        }
+        edges = [
+            RoadEdge(
+                f"{a}-{b}", str(a), str(b), 1, rng.uniform(0, 10), predictive_risk=rng.random()
+            )
+            for a in range(7)
+            for b in range(a + 1, 7)
+            if rng.random() < 0.6
+        ]
+        blocked = frozenset(e.edge_id for e in edges if rng.random() < 0.2)
+        hazard = HazardState("random", now, blocked)
+        weights = CostWeights()
+
+        def exhaustive(node, edges=edges, blocked=blocked, weights=weights):
+            if node == "6":
+                return 0.0
+            return min(
+                (
+                    _edge_cost(
+                        e, hard_blocked=e.edge_id in blocked, data_age_minutes=0, weights=weights
+                    )
+                    + exhaustive(e.target)
+                    for e in edges
+                    if e.source == node
+                ),
+                default=float("inf"),
+            )
+
+        expected = exhaustive("0")
+        result = _astar(
+            origin_node_id="0",
+            destination_node_id="6",
+            nodes=nodes,
+            edges=edges,
+            hazard=hazard,
+            now=now,
+            weights=weights,
+        )
+        if expected == float("inf"):
+            assert result is None
+        else:
+            assert result is not None
+            assert result[2] == pytest.approx(expected)
+            assert not blocked.intersection(e.edge_id for e in result[1])

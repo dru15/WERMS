@@ -3,6 +3,7 @@ import { api, ApiError } from "../api";
 import { staffApi } from "../staff";
 import type { Audit, CommandState, Incident, Resource, StaffUser } from "../staff";
 import type { Shelter } from "../types";
+import { FireExclusionPanel } from "./FireExclusionPanel";
 
 type Props = { credential: string; user?: StaffUser; shelters: Shelter[];
   roads: { id: string; name: string }[]; onSession: (key: string, user: StaffUser) => void;
@@ -155,5 +156,6 @@ export function CommandCentre({ credential, user, shelters, roads, onSession, on
       </form><div className="command-card"><h4>Registered staff</h4><ul className="command-list">{accounts.map(a => <li key={a.username}><strong>{a.username}</strong><span>{a.role} · {a.enabled ? "enabled" : "disabled"}</span>{Boolean(a.enabled) && a.username !== user.username && <button disabled={busy} onClick={() => { void run(() => staffApi.disable(credential, a.username), "Account disabled and sessions revoked."); }}>Disable account</button>}</li>)}</ul></div></div>
       <details className="audit-log"><summary>Audit trail · latest 100 events</summary><ol>{audit.map(a => <li key={a.sequence}><strong>{a.action}</strong> · {a.actor}<br /><small>{new Date(a.timestamp).toLocaleString()} · {a.entity_id}</small><p>{a.details}</p></li>)}</ol></details></section>}
     </>}
+    {dispatcher && <FireExclusionPanel credential={credential} onRefresh={onRefresh} />}
   </section>;
 }

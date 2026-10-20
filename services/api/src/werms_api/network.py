@@ -116,7 +116,7 @@ def routing_graph(network: dict, *, traffic: bool) -> tuple[dict, tuple]:
 
 
 def build_network() -> dict:
-    path = files("werms_api").joinpath("data/palisades-network.json")
+    path = files("werms_api").joinpath("data/dehradun-network.json")
     network = json.loads(path.read_text(encoding="utf-8"))
     if network.get("data_mode") != "osm-pilot" or not network.get("roads"):
         raise ValueError(

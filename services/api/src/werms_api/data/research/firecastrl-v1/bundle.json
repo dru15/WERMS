@@ -1,0 +1,20 @@
+{
+  "model_version": "firecastrl-42-20261020T164258",
+  "research_only": true,
+  "operational_approval": false,
+  "source_csv_sha256": "0be59f7d6a82865c21a37d26b3a390cb8e657b72bcc55750f16b5a4e8bc512ae",
+  "published_at": "2026-10-20T17:32:27.979839+00:00",
+  "files": {
+    "ATTRIBUTION.md": "d3a2799644589044c9cc11241615aa381b31f225c37243bbaf0a960dec7e5fb0",
+    "boosted-calibration.joblib": "09ce86248a7298d63a9d4bdd3efaca3a3035eb27edb38738c119a8c1ea774bb1",
+    "boosted.joblib": "bf5adc90ea283e306b23af1c029336316cc9a25103d592c60ffd5c9fad1bef24",
+    "cases.json": "6cda85c83d0bbfeb63f494aafb61527883b007c5efc4abe9517c3ec93e647b1a",
+    "gru-calibration.joblib": "22703b43cc735551f676b3ba0aec5b1260311a7ab3bf0fadd1abe49f78966bbb",
+    "gru.pt": "80e2818a9b8a008fa3180dca97eb52c4fd254cece9103fb76123a2f023861fa1",
+    "logistic-calibration.joblib": "7948ea6b4540af38094c1d3485b9b1145ef21e044426500d882279e6b34134eb",
+    "logistic.joblib": "8be594e2ed7d3affb7809917c118ccd0abe5a189810e35f32cc150210eadf60b",
+    "report.json": "793dd573eb8e7f97197bbe39bb6c0a8844f7f9c1913deb19bc2b3588f620d56c",
+    "routing-replay-case.json": "0c04d0a1806aaf7b584fc516f8a179e429f82a24ffb743827b09b72d9d2c75d3",
+    "sequence-scaler.npz": "11030e8b185805379c6d9573fb1cd1df04ea1eb2827e9715932b3a7fc6b64e24"
+  }
+}

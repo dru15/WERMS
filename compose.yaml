@@ -2,14 +2,13 @@ name: werms
 
 services:
   db:
-    profiles: ["spatial"]
     image: postgis/postgis:16-3.5
     environment:
       POSTGRES_DB: werms
       POSTGRES_USER: werms
       POSTGRES_PASSWORD: werms
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -40,9 +39,14 @@ services:
       DATABASE_URL: postgresql+asyncpg://werms:werms@db:5432/werms
       REDIS_URL: redis://redis:6379/0
       WEB_ORIGIN: http://localhost:5173
-      OPERATIONAL_DB_PATH: /app/data/operational/palisades.sqlite3
+      OPERATIONAL_DB_PATH: /app/data/operational/dehradun.sqlite3
+      SPATIAL_DATABASE_URL: postgresql://werms:werms@db:5432/werms
     volumes:
       - pilot-data:/app/data/operational
+      - ./artifacts/models:/app/artifacts/models:ro
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       - "8000:8000"
 

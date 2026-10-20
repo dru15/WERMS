@@ -1,0 +1,38 @@
+{
+  "measured_at": "2026-10-17T10:54:00.419185+00:00",
+  "python": "3.12.14",
+  "platform": "Windows",
+  "road_version": "osm-dehradun-b24ce6b833cb",
+  "nodes": 4480,
+  "physical_road_segments": 4547,
+  "sample_count": 60,
+  "routes_evaluated": 180,
+  "median_ms": 94.09,
+  "p95_ms": 115.55,
+  "max_ms": 121.52,
+  "hard_closure_violations": 0,
+  "scenario_checks": [
+    {
+      "origin": "Rajpur Road neighbourhood",
+      "outcome": "rerouted",
+      "before": 3,
+      "after": 2,
+      "compute_ms": 234.5
+    },
+    {
+      "origin": "Malsi neighbourhood",
+      "outcome": "rerouted",
+      "before": 3,
+      "after": 2,
+      "compute_ms": 306.17
+    },
+    {
+      "origin": "Jakhan neighbourhood",
+      "outcome": "rerouted",
+      "before": 3,
+      "after": 3,
+      "compute_ms": 201.62
+    }
+  ],
+  "method": "Sequential warm planner calls across three origins, party=4, isolated SQLite; not HTTP, load or emergency-safety certification."
+}

@@ -1,7 +1,6 @@
 from datetime import UTC, datetime
 
 import pytest
-
 from werms_api.domain.models import (
     HazardState,
     NoSafeRouteError,

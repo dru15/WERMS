@@ -1,0 +1,70 @@
+{
+  "source": "Wildfire_Dataset.csv",
+  "sha256": "0be59f7d6a82865c21a37d26b3a390cb8e657b72bcc55750f16b5a4e8bc512ae",
+  "source_version": 1,
+  "license": "MIT",
+  "windows": 126799,
+  "raw_rows": 9509925,
+  "accepted": 126442,
+  "quarantined": 343,
+  "quarantine_reasons": {
+    "unexpected_temperature_units_or_range": 343
+  },
+  "duplicates_removed": 14,
+  "source_positive_windows_before_dedup": 33471,
+  "variables": [
+    "pr",
+    "rmax",
+    "rmin",
+    "sph",
+    "srad",
+    "tmmn",
+    "tmmx",
+    "vs",
+    "bi",
+    "fm100",
+    "fm1000",
+    "erc",
+    "etr",
+    "pet",
+    "vpd"
+  ],
+  "input_days": 60,
+  "excluded_reference_and_future_days": 15,
+  "temperature_conversion": "Observed Kelvin values validated 180..350 K then converted to Celsius",
+  "split_policy": {
+    "train": "reference <= 2020-12-31; SHA256(1-degree cell) bucket 0..5",
+    "validation": "2021-03-02..2022-12-31; cell bucket 6",
+    "calibration": "2023-03-02..2023-12-31; cell bucket 7",
+    "test": "2024-03-02..2025-12-31; cell bucket 8..9",
+    "unused": "Other cell/year combinations; 60-day temporal purge at each later period boundary",
+    "caveat": "No original incident IDs are released. Geographic blocking mitigates offset-negative families; it cannot prove absence of all source-label leakage."
+  },
+  "split_counts": {
+    "unused": 65152,
+    "train": 58307,
+    "validation": 1129,
+    "calibration": 1013,
+    "test": 841
+  },
+  "bounds": [
+    25.2602699992712,
+    -124.437,
+    48.9987299990662,
+    -67.0125
+  ],
+  "raw_reference_day_class_counts": {
+    "positive": 33471,
+    "negative": 93328
+  },
+  "accepted_reference_date_range": [
+    "2014-03-01",
+    "2025-03-29"
+  ],
+  "advertised_counts": {
+    "windows": 126800,
+    "positive": 50720,
+    "negative": 76080
+  },
+  "count_discrepancy": "Measured CSV differs from author summary; observed counts take precedence."
+}

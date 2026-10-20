@@ -2,7 +2,6 @@ from uuid import uuid4
 
 import httpx
 import pytest
-
 from werms_api.config import Settings
 from werms_api.main import create_app
 from werms_api.network import build_demo_network

@@ -29,6 +29,22 @@ class ConfirmRouteRequest(RouteRequest):
     replace_route_id: UUID | None = None
 
 
+class ScenarioRequest(RouteRequest):
+    blocked_edge_ids: list[str] = Field(default_factory=list, max_length=25)
+    unavailable_shelter_ids: list[str] = Field(default_factory=list, max_length=10)
+    fire_polygon: dict | None = None
+
+
+class FireExclusionRequest(BaseModel):
+    exclusion_id: UUID
+    geometry: dict
+    reason: str = Field(min_length=3, max_length=300)
+
+
+class FireExclusionStatus(BaseModel):
+    active: bool
+
+
 class RoutePoint(Coordinate):
     node_id: str
 

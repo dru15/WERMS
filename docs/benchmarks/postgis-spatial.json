@@ -1,0 +1,25 @@
+{
+  "runtime": [
+    "PostgreSQL 17.11 on x86_64-windows, compiled by msvc-19.44.35229, 64-bit",
+    "3.6.2"
+  ],
+  "road_version": "osm-dehradun-b24ce6b833cb",
+  "indexed_segments": 4547,
+  "intersecting_segments": 7,
+  "hard_constraint_violations": 0,
+  "scenario_outcome": "rerouted",
+  "reachable_before": 3,
+  "reachable_after": 2,
+  "changes_operational_state": false,
+  "query_plan": [
+    "Index Scan using werms_roads_geom on werms_roads  (cost=0.15..20.67 rows=1 width=20) (actual time=0.696..0.728 rows=7 loops=1)",
+    "  Index Cond: (geom && '0103000020E61000000100000005000000255CC823B8845340ABFDE77AEC623E40B3D1393FC5845340ABFDE77AEC623E40B3D1393FC5845340E3D3ADE820633E40255CC823B8845340E3D3ADE820633E40255CC823B8845340ABFDE77AEC623E40'::geometry)",
+    "  Filter: ((road_version = 'osm-dehradun-b24ce6b833cb'::text) AND st_intersects(geom, '0103000020E61000000100000005000000255CC823B8845340ABFDE77AEC623E40B3D1393FC5845340ABFDE77AEC623E40B3D1393FC5845340E3D3ADE820633E40255CC823B8845340E3D3ADE820633E40255CC823B8845340ABFDE77AEC623E40'::geometry))",
+    "  Buffers: shared hit=29",
+    "Planning:",
+    "  Buffers: shared hit=178",
+    "Planning Time: 3.000 ms",
+    "Execution Time: 0.967 ms"
+  ],
+  "measured_at": "2026-10-20T17:22:43.360007+00:00"
+}

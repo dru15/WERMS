@@ -42,16 +42,18 @@ class Operations:
         threshold: float = 0.9,
         validity_seconds: int = 300,
         network: dict | None = None,
+        spatial=None,
     ):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.threshold = threshold
         self.validity_seconds = validity_seconds
         self.network = network if network is not None else build_network()
+        self.spatial = spatial
         self.nodes, self.edges = routing_graph(self.network, traffic=True)
         with self.transaction() as db:
             schema_version = db.execute("PRAGMA user_version").fetchone()[0]
-            if schema_version not in (0, 1):
+            if schema_version not in (0, 1, 2):
                 raise RuntimeError("Stored schema version is unsupported; migrate explicitly.")
             db.execute("""CREATE TABLE IF NOT EXISTS meta (
                 key TEXT PRIMARY KEY, value TEXT NOT NULL)""")
@@ -60,6 +62,9 @@ class Operations:
                 status TEXT NOT NULL, updated_at TEXT NOT NULL)""")
             db.execute("""CREATE TABLE IF NOT EXISTS closures (
                 edge_id TEXT PRIMARY KEY, reason TEXT NOT NULL, updated_at TEXT NOT NULL)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS fire_exclusions (
+                id TEXT PRIMARY KEY, geometry TEXT NOT NULL, edge_ids TEXT NOT NULL,
+                reason TEXT NOT NULL, active INTEGER NOT NULL, created_at TEXT NOT NULL)""")
             db.execute("""CREATE TABLE IF NOT EXISTS routes (
                 id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE,
                 fingerprint TEXT NOT NULL, shelter_id TEXT NOT NULL REFERENCES shelters(id),
@@ -93,7 +98,8 @@ class Operations:
                     "INSERT INTO closures VALUES (?, 'Initial pilot closure', ?)",
                     [(e, now) for e in self.network["initial_closures"]],
                 )
-                db.execute("PRAGMA user_version=1")
+            # Older releases must refuse this store rather than ignore published fire exclusions.
+            db.execute("PRAGMA user_version=2")
 
     @contextmanager
     def transaction(self):
@@ -149,15 +155,21 @@ class Operations:
         return HazardState(
             version=f"hazard-{meta['hazard_version']}",
             source_timestamp=datetime.fromisoformat(meta["hazard_timestamp"]),
-            blocked_edge_ids=frozenset(r[0] for r in db.execute("SELECT edge_id FROM closures")),
+            blocked_edge_ids=frozenset(r[0] for r in db.execute("SELECT edge_id FROM closures"))
+            | frozenset(
+                edge
+                for row in db.execute("SELECT edge_ids FROM fire_exclusions WHERE active=1")
+                for edge in json.loads(row[0])
+            ),
         )
 
-    def _shelters(self, db) -> list[Shelter]:
+    def _shelters(self, db, *, at: datetime | None = None) -> list[Shelter]:
         seeds = {s["id"]: s for s in self.network["shelters"]}
         demand = dict(
             db.execute(
                 "SELECT shelter_id,SUM(party_size) FROM routes "
-                "WHERE status='valid' GROUP BY shelter_id"
+                "WHERE status='valid' AND (? IS NULL OR valid_until>?) GROUP BY shelter_id",
+                (at.isoformat() if at else None, at.isoformat() if at else None),
             ).fetchall()
         )
         result = []
@@ -255,11 +267,19 @@ class Operations:
             )
         return nearest
 
-    def _previews(self, db, request: RouteRequest, now: datetime) -> list[RoutePreview]:
+    def _previews(
+        self,
+        db,
+        request: RouteRequest,
+        now: datetime,
+        *,
+        hazard: HazardState | None = None,
+        shelters: list[Shelter] | None = None,
+    ) -> list[RoutePreview]:
         origin = self._origin(request)
-        hazard = self._hazard(db)
+        hazard = hazard if hazard is not None else self._hazard(db)
         nodes, edges = routing_graph(self.network, traffic=request.traffic)
-        shelters = self._shelters(db)
+        shelters = shelters if shelters is not None else self._shelters(db)
         if request.shelter_id and request.shelter_id not in {s.shelter_id for s in shelters}:
             raise OperationError("UNKNOWN_SHELTER", "Shelter was not found.", 404)
         candidates = []
@@ -447,6 +467,14 @@ class Operations:
         with self.transaction() as db:
             self._expire(db, now)
             exists = db.execute("SELECT 1 FROM closures WHERE edge_id=?", (edge_id,)).fetchone()
+            if not closed and any(
+                edge_id in json.loads(row[0])
+                for row in db.execute("SELECT edge_ids FROM fire_exclusions WHERE active=1")
+            ):
+                raise OperationError(
+                    "FIRE_EXCLUSION_ACTIVE",
+                    "Deactivate the fire exclusion before reopening this segment.",
+                )
             if bool(exists) == closed:
                 return self._snapshot(db)
             if closed:
@@ -535,6 +563,106 @@ class Operations:
                 details=request.model_dump(mode="json"),
             )
             return self._snapshot(db)
+
+    def fire_exclusions(self) -> list[dict]:
+        with self.transaction() as db:
+            return [
+                {
+                    "id": r["id"],
+                    "geometry": json.loads(r["geometry"]),
+                    "edge_ids": json.loads(r["edge_ids"]),
+                    "reason": r["reason"],
+                    "active": bool(r["active"]),
+                    "created_at": r["created_at"],
+                }
+                for r in db.execute("SELECT * FROM fire_exclusions ORDER BY created_at DESC")
+            ]
+
+    def publish_fire_exclusion(self, identifier: str, geometry: dict, reason: str, actor: str):
+        from werms_api.spatial import validated_polygon
+
+        canonical = json.dumps(validated_polygon(geometry), sort_keys=True, separators=(",", ":"))
+        now = datetime.now(UTC)
+
+        # Recover an already committed publication even while PostGIS is offline.
+        with self.transaction() as db:
+            self._expire(db, now)
+            existing = db.execute(
+                "SELECT geometry,reason FROM fire_exclusions WHERE id=?", (identifier,)
+            ).fetchone()
+            if existing:
+                if tuple(existing) != (canonical, reason):
+                    raise OperationError(
+                        "IDEMPOTENCY_CONFLICT", "Exclusion ID already has another payload."
+                    )
+                return self._snapshot(db)
+        if self.spatial is None:
+            raise OperationError(
+                "SPATIAL_UNAVAILABLE", "Configure PostGIS to evaluate fire geometry.", 503
+            )
+        edge_ids = self.spatial.intersections(geometry)
+        with self.transaction() as db:
+            self._expire(db, now)
+            existing = db.execute(
+                "SELECT geometry,reason FROM fire_exclusions WHERE id=?", (identifier,)
+            ).fetchone()
+            if existing:
+                if tuple(existing) != (canonical, reason):
+                    raise OperationError(
+                        "IDEMPOTENCY_CONFLICT", "Exclusion ID already has another payload."
+                    )
+                return self._snapshot(db)
+            db.execute(
+                "INSERT INTO fire_exclusions VALUES (?,?,?,?,1,?)",
+                (identifier, canonical, json.dumps(edge_ids), reason, now.isoformat()),
+            )
+            self._exclusion_changed(db, identifier, edge_ids, now, actor)
+            return self._snapshot(db)
+
+    def set_fire_exclusion(self, identifier: str, active: bool, actor: str):
+        now = datetime.now(UTC)
+        with self.transaction() as db:
+            self._expire(db, now)
+            row = db.execute("SELECT * FROM fire_exclusions WHERE id=?", (identifier,)).fetchone()
+            if row is None:
+                raise OperationError("NOT_FOUND", "Fire exclusion was not found.", 404)
+            if bool(row["active"]) != active:
+                db.execute(
+                    "UPDATE fire_exclusions SET active=? WHERE id=?", (int(active), identifier)
+                )
+                self._exclusion_changed(
+                    db, identifier, json.loads(row["edge_ids"]) if active else [], now, actor
+                )
+            return self._snapshot(db)
+
+    def _exclusion_changed(self, db, identifier, edge_ids, now, actor):
+        blocked = set(edge_ids)
+        for row in db.execute("SELECT id,payload FROM routes WHERE status='valid'").fetchall():
+            if blocked.intersection(json.loads(row["payload"])["edge_ids"]):
+                db.execute(
+                    "UPDATE routes SET status='invalid',cause='FIRE_EXCLUSION_INTERSECTION' "
+                    "WHERE id=?",
+                    (row["id"],),
+                )
+                self._audit(
+                    db,
+                    "route.invalidated",
+                    row["id"],
+                    now,
+                    actor=actor,
+                    details={"fire_exclusion": identifier},
+                )
+        db.execute("UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='hazard_version'")
+        db.execute("UPDATE meta SET value=? WHERE key='hazard_timestamp'", (now.isoformat(),))
+        self._bump(db)
+        self._audit(
+            db,
+            "fire_exclusion.changed",
+            identifier,
+            now,
+            actor=actor,
+            details={"blocked_segments": len(blocked), "engine": "PostGIS"},
+        )
 
     def audit(self) -> list[dict]:
         with self.transaction() as db:

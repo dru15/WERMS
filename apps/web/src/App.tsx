@@ -1,12 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "./api";
 import { clearPending, readPending, savePending } from "./confirmation";
 import { OperationsMap } from "./components/OperationsMap";
-import { CommandCentre } from "./components/CommandCentre";
+import { IndiaOverview } from "./components/IndiaOverview";
 import type { StaffUser } from "./staff";
 import type { Plan } from "./network";
 import type { RouteInput, RoutePreview } from "./types";
 import { useOperations } from "./useOperations";
+
+const CommandCentre = lazy(() => import("./components/CommandCentre").then(m => ({default:m.CommandCentre})));
+const ResilienceLab = lazy(() => import("./components/ResilienceLab").then(m => ({default:m.ResilienceLab})));
+const MLObservatory = lazy(() => import("./components/MLObservatory").then(m => ({default:m.MLObservatory})));
 
 export default function App() {
   const { network, snapshot, route, connection, error, lastSync, refresh, remember } = useOperations();
@@ -43,6 +47,7 @@ export default function App() {
       occupancy: displayed.shelter.occupancy + displayed.shelter.reserved_demand },
   }), [displayed]);
   const realWorld = network?.data_mode === "osm-pilot";
+  const india = network?.country === "IN";
   const mapNetwork = realWorld ? network : network && { ...network, shelters: network.shelters.map(s => {
     const state = snapshot?.shelters.find(item => item.shelter_id === s.id);
     return { ...s, occupancy: state ? state.occupancy + state.reserved_demand : s.occupancy };
@@ -122,20 +127,22 @@ export default function App() {
 
   return <div className="app-shell">
     <header className="topbar">
-      <a href="#main" className="brand" onClick={() => setTab("Operations")}><span className="brand-flame">◈</span><span><strong>WERMS</strong><small>Wildfire operations</small></span></a>
-      <nav className="primary-nav" aria-label="Primary navigation">{["Operations", "Routes", "Shelters", "Command centre"].map(t => <button key={t} className={tab === t ? "active" : ""} aria-current={tab === t ? "page" : undefined} onClick={() => setTab(t)}>{t}</button>)}</nav>
+      <a href="#main" className="brand" onClick={() => setTab("Operations")}><span className="brand-flame">◈</span><span><strong>WERMS{india && <span className="brand-country"> / INDIA</span>}</strong><small>{india ? "Forest-fringe response intelligence" : "Wildfire operations"}</small></span></a>
+      <nav className="primary-nav" aria-label="Primary navigation">{["Operations", "AI observatory", "Resilience lab", "Shelters", "Command centre"].map(t => <button key={t} className={tab === t ? "active" : ""} aria-current={tab === t ? "page" : undefined} onClick={() => setTab(t)}>{t}</button>)}</nav>
       <div className="system-strip"><span className={connected ? "status-dot live" : "status-dot"} /><strong>{connection === "loading" ? "Connecting" : connected ? "Service connected" : "Updates unavailable"}</strong><button className="reset-button" disabled={busy} onClick={() => { void refresh(); }}>Refresh state</button></div>
     </header>
     <section className="incident-bar">
-      <div className="incident-identity"><span className="incident-icon">◆</span><div><span className="incident-kicker">{!network ? "Connecting to operations service" : realWorld ? "Real-world road pilot / Los Angeles" : "Connected pilot / PR-04"}</span><h1>{!network ? "Loading operations" : realWorld ? "Pacific Palisades operations" : "Pine Ridge Fire"}</h1></div><span className="severity-badge">{!network ? "Awaiting network" : realWorld ? "Demo incident controls" : "Fictional incident"}</span></div>
+      <div className="incident-identity"><span className="incident-icon">◆</span><div><span className="incident-kicker">{!network ? "Connecting to operations service" : realWorld ? `Real-world road pilot / ${network.region ?? network.name}` : "Connected pilot / PR-04"}</span><h1>{!network ? "Loading operations" : india ? "Dehradun response desk" : realWorld ? `${network.name} operations` : "Pine Ridge Fire"}</h1></div><span className="severity-badge">{!network ? "Awaiting network" : realWorld ? "Research pilot" : "Fictional incident"}</span></div>
       <div className="incident-metrics"><div><span>Road network</span><strong>{network?.roads.length ?? "—"} segments</strong></div><div><span>Closures</span><strong>{snapshot ? blocked.length : "—"}</strong></div><div><span>Reserved spaces</span><strong>{snapshot ? reserved : "—"}</strong></div></div>
     </section>
     <main className="app-main" id="main">
+      <Suspense fallback={<section className="connection-panel" role="status">Loading workspace…</section>}>
+      {india && network && tab === "Operations" && <IndiaOverview network={network} onExplore={() => setTab("Resilience lab")} />}
       <div className="simulation-notice">{!network ? "Connecting to the shared operations service. Route planning becomes available when its road network and current state arrive." : realWorld ? "Real OpenStreetMap geography and roads. Routing is limited to the marked pilot area. Closures, assembly-site capacities, and travel times are demonstration estimates; these are not verified emergency shelters." : "Connected research pilot. Roads, incidents, travel times, and shelters are fictional. Bookings and road changes are shared and saved by the service."}</div>
       {error && <div className="alert critical" role="alert"><strong>Operations unavailable</strong><span>{error} Displayed plans are unverified until updates resume.</span></div>}
-      <div className="activity-message" role="status">{message}</div>
+      {tab === "Operations" && <div className="activity-message" role="status">{message}</div>}
       {invalid && <div className="alert critical" role="alert"><strong>{expired ? "Plan expired" : "Route interrupted"}</strong><span>Compare routes and confirm a new plan. This path is no longer eligible for guidance.</span></div>}
-      {!network ? <section className="connection-panel"><h2>{connection === "loading" ? "Loading pilot network…" : "Connect to the operations service"}</h2><p>The app will retry automatically. No local route is substituted for service data.</p><button className="primary-action" onClick={() => { void refresh(); }}>Retry connection</button></section> : tab === "Command centre" ? <CommandCentre credential={operatorKey} user={staffUser} shelters={snapshot?.shelters ?? []} roads={network.roads} onSession={(key, user) => { setOperatorKey(key); setStaffUser(user); }} onLock={() => { setOperatorKey(""); setStaffUser(undefined); }} onRefresh={refresh} /> : <div className="workspace-grid">
+      {!network ? <section className="connection-panel"><h2>{connection === "loading" ? "Loading pilot network…" : "Connect to the operations service"}</h2><p>The app will retry automatically. No local route is substituted for service data.</p><button className="primary-action" onClick={() => { void refresh(); }}>Retry connection</button></section> : tab === "Command centre" ? <CommandCentre credential={operatorKey} user={staffUser} shelters={snapshot?.shelters ?? []} roads={network.roads} onSession={(key, user) => { setOperatorKey(key); setStaffUser(user); }} onLock={() => { setOperatorKey(""); setStaffUser(undefined); }} onRefresh={refresh} /> : tab === "AI observatory" ? <MLObservatory /> : tab === "Resilience lab" ? <ResilienceLab network={network} snapshot={snapshot} /> : <div className="workspace-grid">
         <OperationsMap network={mapNetwork} plan={viewPlan} blocked={blocked} origin={displayed?.path[0]?.node_id ?? selectedOrigin} progress={progress} invalid={invalid || !connected} traffic={traffic}
           onOrigin={id => { if (!busy) { setOrigin(id); clearPreview(); log("Starting point selected on the real road network. Compare routes to continue."); } }}
           onTraffic={busy ? undefined : () => { setTraffic(t => !t); clearPreview(); log("Traffic preference changed. Compare routes to apply it."); }}
@@ -172,7 +179,8 @@ export default function App() {
           </div>
         </aside>
       </div>}
-      <footer className="simulation-footer">{!network ? "Loading road network" : realWorld ? "OpenStreetMap road pilot" : "Fictional pilot"} · Predictive models disabled · {lastSync ? `Last synchronized ${new Date(lastSync).toLocaleTimeString()}` : "Awaiting service state"} · Not for real evacuation guidance</footer>
+      <footer className="simulation-footer">{!network ? "Loading road network" : realWorld ? "OpenStreetMap road pilot" : "Fictional pilot"} · India forecasts unavailable · AI research in the observatory · {lastSync ? `Last synchronized ${new Date(lastSync).toLocaleTimeString()}` : "Awaiting service state"} · Not for real evacuation guidance</footer>
+      </Suspense>
     </main>
   </div>;
 }

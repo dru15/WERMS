@@ -1,3 +1,4 @@
+import type {FeatureCollection,LineString,Polygon} from "geojson";
 export type Point = { id: string; x: number; y: number; latitude?: number; longitude?: number };
 export type Road = { id: string; from: string; to: string; name: string; minutes: number; km: number; traffic: number;
   direction?: "both" | "forward" | "reverse"; osm_way_id?: string; highway?: string };
@@ -5,8 +6,13 @@ export type MapShelter = { id: string; node: string; name: string; capacity: num
   latitude?: number; longitude?: number; access_distance_m?: number; osm_url?: string };
 export type Plan = { nodes: string[]; edges: string[]; minutes: number; km: number; shelter: MapShelter };
 export type Network = {
+  context?:FeatureCollection<LineString|Polygon>;
   version: string;
   name: string;
+  region?: string;
+  country?: string;
+  timezone?: string;
+  profile?: string;
   data_mode: "fictional-pilot" | "osm-pilot";
   bounds?: [number, number, number, number];
   source?: { name: string; url: string; license: string; data_timestamp: string; imported_at: string };

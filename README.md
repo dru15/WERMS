@@ -1,110 +1,91 @@
 # WERMS
 
-Wildfire Evacuation and Resource Management System is a decision-support research application with a **real OpenStreetMap basemap and imported Pacific Palisades road network**. The backend computes routes on the same mapped roads displayed by the client, with shared road closures and durable bookings. Incident closures, assembly-site capacity, occupancy, and travel times remain demonstration estimates. Mapped landmarks are not verified emergency shelters. Predictive models are disabled; this is not for real emergency guidance.
+**Wildfire Evacuation and Resource Management System** combines an India-focused operations application with a reproducible wildfire-ML research pipeline. The main pilot covers Rajpur–Malsi, Dehradun, Uttarakhand: **4,480 real OpenStreetMap nodes and 4,547 physical road segments**. It includes vector mapping, hazard-aware A*, durable shelter reservations, staff workflows, and PostGIS fire-perimeter constraints.
 
-## Working application
+The AI observatory serves three genuinely trained models, calibration evidence, held-out sequences, fresh CPU inference, sensitivity analysis, and a separate US spatial routing replay. **FireCastRL is a US dataset. Its scores are not validated India forecasts.** Closures, capacities, occupancy, travel estimates, and assembly-site suitability remain demonstration conditions. This is a research application, not emergency guidance or an established patent.
 
-- One backend-owned OSM extract: 1,029 mapped nodes, 1,110 physical road segments, 289 one-way segments, and 19 turn restrictions. The map uses real coordinates and OSM tiles with visible attribution.
-- Select a starting point directly on the map or use a pilot-area preset. Map viewing is global; route calculation is restricted to the marked pilot boundary and proximity to an imported road.
-- Compare destinations without reserving capacity. Confirming a plan checks the entire party against shelter capacity and the configured 90% allocation threshold.
-- Confirmed plans persist across browser refresh and API restart. Retries use an idempotency key; an interrupted confirmation is recovered after reload using the original key.
-- Replace a booking atomically. If the replacement fails, the old booking remains intact.
-- Expiry, cancellation, and closure invalidation release reserved demand. Reopening a road does not revive invalidated plans.
-- Protected operator controls close/reopen roads and check parties into shelters. Arrival converts reserved demand to occupancy exactly once.
-- WebSocket closure signals and five-second state polling resynchronize clients. Disconnection pauses route previews and marks guidance unverified.
-- Audit records persist confirmations, arrivals, cancellations, expiry, and closure changes.
-- Named staff accounts with administrator, dispatcher, and site-scoped shelter roles; eight-hour revocable sessions, password hashing, and persisted login throttling.
-- Command centre with sourced, timestamped incident reports, acknowledgement, escalation, and resolution. A report never silently becomes a road closure.
-- Register resource units, mark availability, dispatch atomically, acknowledge assignments, complete/cancel, and release the unit. Duplicate requests cannot allocate a unit twice.
-- Edit site status and checked-in occupancy with a reason, reservation-aware capacity checks, and stale-update protection. Closing a site invalidates its incoming bookings.
+## What works
 
-Bookings expire after five minutes by default, as do their associated routes. The journey animation is an accelerated preview, not GPS tracking or arrival confirmation. A booking code grants access to that plan and cancellation; share it only with the relevant shelter operator.
+- Sharp MapLibre/OpenFreeMap vector maps with real roads, labels, land cover, source attribution, visible provider failure and retry. Local OSM context retains 127 mapped building/land/water features in Dehradun and 481 in the US replay during provider outages. Pan globally; route only inside the imported pilot.
+- Turn-aware A* with a consistent geographic heuristic derived from actual graph costs. Hard road/fire exclusions precede search; full-party capacity and the configured 90% admission threshold constrain destinations. Soft exposure costs scale with distance.
+- Preview without allocation; confirm with durable, idempotent reservations; recover interrupted confirmation after reload; replace atomically; cancel, expire, invalidate and check in exactly once.
+- Administrator, dispatcher and site-scoped shelter accounts; salted PBKDF2 password hashes, eight-hour revocable sessions, login throttling and persistent audits. API permissions are independent of hidden controls.
+- Incident reporting/acknowledgement/escalation/resolution, resource registration and atomic dispatch/acknowledgement/completion/cancellation, and reservation-aware site administration.
+- A resilience lab comparing road, site, compound and fire-perimeter disruptions without changing operational state. It exports the actual comparison evidence.
+- PostGIS-indexed OSM geometry, topological polygon validation and boundary-inclusive `ST_Intersects`. Publishing a perimeter atomically invalidates affected bookings and releases capacity. Saved constraints survive a spatial-service outage; new geometry fails visibly.
+- Sourced Open-Meteo model weather for the fixed pilot centre, with IST timestamps, validation, cache/backoff and explicit stale/unavailable states. Weather context is not a fire probability.
 
-The operational client never silently substitutes browser-local routing when the service is unavailable. The older `simulation.ts` remains an isolated training/reference module used by standalone map and simulation tests.
+## Real ML evidence
+
+The downloaded public release contains **126,799 windows and 9,509,925 daily rows**, rather than the advertised 126,800 windows. Its measured reference-day classes are **33,471 positive / 93,328 negative**, also different from the release summary. See the [source audit](docs/research/firecastrl-source-audit.md) and [measured data manifest](docs/benchmarks/firecastrl-data-audit.json).
+
+The pipeline validates ordered 75-day blocks, derives the reference date, excludes the reference and following 14 days from predictors, converts observed Kelvin temperatures to Celsius, quarantines 343 invalid-temperature windows and removes 14 duplicate windows. It produces **126,442 causal 60×15 sequences**. Chronology, geographic groups and exact input hashes are checked across splits; preprocessing fits training only. Original incident-family IDs are absent, so residual source-label leakage cannot be disproved.
+
+The frozen run uses 58,307 training, 1,129 validation, 1,013 calibration and 841 test cases; other location/year combinations remain unused. Test AUROC:
+
+- Logistic Regression: **0.841**.
+- Gradient-Boosted Trees: **0.863**.
+- Two-layer GRU with temporal attention: **0.891**.
+
+The report also records AUPRC, recall, precision, F1, Brier, ECE, confusion matrices, reliability bins and precision–recall curves. **Boosted trees were selected by validation AUPRC**, despite the GRU's higher test AUROC. Test prevalence is 87.99%, so its no-skill AUPRC is 0.880. Substantial calibration error remains under prevalence shift; cohort probabilities are not population fire incidence. The [model card](docs/model-card.md) explains these limits.
+
+Open **AI observatory** to inspect the actual run and execute all three models with last-seven-day ablation sensitivity. Its California replay projects an unused source case through PostGIS onto real OSM roads and into A* costs. The 3 km experimental support neighbourhood is not a measured GRIDMET footprint. The replay creates no booking, never transfers US scores to India, and does not contribute to benchmark accuracy. See [ML routing evidence](docs/benchmarks/ml-routing-replay.json).
 
 ## Run locally
 
-Prerequisites: Python 3.12+ and Node.js 22+. Docker is not required for the current SQLite pilot.
-
-On first setup, create `.env` from `.env.example` if no `.env` exists, then bootstrap:
+Python 3.12+ and Node.js 22+ are required. Copy `.env.example` to `.env` only if no local `.env` exists.
 
 ```powershell
 ./scripts/bootstrap.ps1
 ./scripts/dev.ps1
 ```
 
-Open [the application](http://localhost:5173) and [API documentation](http://localhost:8000/docs). The development script starts both services and stops its API process when the web process exits. Alternatively, use two terminals:
+Open [the app](http://localhost:5173/) and [API docs](http://localhost:8000/docs). Bootstrap installs CPU PyTorch and the ML/spatial dependencies. With no trained artifacts the observatory explicitly reports that no evaluation is published. No scores are fabricated.
+
+Operational data lives at `data/operational/dehradun.sqlite3`; raw data, training output, local credentials and temporary runtimes are ignored by Git. A verified **974 KB research model bundle** is included in the Python package for a working fresh-clone AI demo. Its attribution, hashes and research-only status are in `services/api/src/werms_api/data/research/firecastrl-v1/`. Leave `ML_REPORT_PATH` blank to use it; an explicit missing custom run reports unavailable instead of invented scores. Preserve old California/fictional databases separately. **Schema 2 adds fire exclusions and prevents an older release silently opening a store whose constraints it cannot enforce.** A graph-version change still requires explicit migration or a new database.
+
+In development, open `data/operational/operator.key` yourself and enter it under **Operator access** or **Command centre → First-time administrator setup**. Create named accounts, then use staff sign-in. Credentials stay in tab memory; reload requires sign-in. Booking codes grant plan access/cancellation and should be protected. Remote hosting requires an explicit strong `OPERATOR_API_KEY`, HTTPS and correct browser API/WebSocket URLs.
+
+## Train the public dataset
+
+On Windows, the bounded resumable downloader uses the official public Kaggle endpoint:
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn werms_api.main:app --app-dir services/api/src --reload --port 8000
+.\.venv\Scripts\python.exe scripts/fetch_research_assets.py dataset
+./scripts/run_ml_pipeline.ps1
+.\.venv\Scripts\python.exe scripts/build_ml_replay.py
 ```
+
+The explicit cross-platform training steps are `python -m ml.prepare --source <CSV>` and `python -m ml.train`. Completed output directories are immutable; choose a new `--output` and update `ML_REPORT_PATH` for another run. Local training output is in `artifacts/models/firecastrl-v1/`; the measured report is checked in at [firecastrl-run.json](docs/benchmarks/firecastrl-run.json). The app defaults to the packaged verified research run, so dataset download is needed only for reproduction/retraining. `scripts/publish_research_models.py` verifies an explicit artifact allowlist before publishing that small bundle. See [ML instructions](ml/README.md) for the contract and Windows TLS recovery. Never load model artifacts from untrusted uploads.
+
+## Run native PostGIS without Docker
+
+The tested Windows setup uses official portable PostgreSQL 17.11 and PostGIS 3.6.2 archives inside this workspace, a limited application role and a localhost-only cluster. It installs no Windows service.
 
 ```powershell
-npm run dev:web
+.\.venv\Scripts\python.exe scripts/fetch_research_assets.py postgres --core
+.\.venv\Scripts\python.exe scripts/fetch_research_assets.py postgis
+.\.venv\Scripts\python.exe scripts/start_local_postgis.py
 ```
 
-By default operational state is stored at `data/operational/palisades.sqlite3`. `OPERATIONAL_DB_PATH` overrides this location. State is seeded once; refreshing the app or restarting the API does not reset closures, occupancy, or bookings. The earlier fictional pilot's database is retained separately; its booking IDs do not transfer to a different real-road graph.
+Keep that terminal running. It writes a private `SPATIAL_DATABASE_URL` into ignored `.env`; restart the API afterwards. Ctrl+C shuts down this project's cluster. Without PostGIS, ordinary road/capacity operations still work, but spatial scenarios and ML routing replay are unavailable. [Runtime provenance](docs/research/postgis-runtime.md) documents sources and licensing.
 
-## Operator access
+PostGIS evaluates geometry; SQLite serializes publication, invalidation, capacity and booking state. This avoids a distributed commit. Existing exclusions are immutable geometry-to-edge projections tied to the imported road version; disabling one never revives old bookings. This is not a migration of the entire operational store to PostgreSQL.
 
-In development, the API generates a random access key in `data/operational/operator.key`. Open that local file yourself, enter its contents in the app's **Operator access** form, and enable the controls. The key remains in browser memory and is cleared by reloading or locking the controls; it is never sent in a URL or stored in browser local storage. The operational data directory is ignored by Git.
-
-An operator can select a road on the map to close/reopen it and enter a booking code under **Shelters → Shelter check-in**. The activity list is local to the browser; the persistent audit history is available from the protected `/api/v1/operator/audit` endpoint.
-
-Open **Command centre → First-time administrator setup**, unlock using that key, and create named staff accounts. Passwords require at least 12 characters and are stored as salted PBKDF2-SHA256 hashes (600,000 iterations). Sign out, then use **Staff sign-in**. Staff sessions expire after eight hours, remain only in tab memory, and can be revoked by signing out or disabling an account. Reloading requires signing in again. Five failed login attempts per username or client address cause a 15-minute throttle. The bootstrap key remains an administrator recovery credential; protect it separately.
-
-Administrators manage accounts and view audits. Dispatchers manage closures, incidents, resources, and sites. Shelter staff can update and check in bookings only for their assigned site. The API enforces these rules independently of the interface. Inventory starts empty; register exercise resources yourself rather than presenting fabricated units as operational.
-
-For remote hosting, explicitly configure a random `OPERATOR_API_KEY` of at least 24 characters and terminate HTTPS in front of the service. Startup rejects production without that secret. This remains a research pilot, not a public emergency service.
-
-## Data consistency
-
-SQLite transactions serialize preview state reads, booking selection, replacement, and capacity updates. A reservation is the demand of an active confirmed plan; it cannot accumulate independently of the booking. The server enforces expiry when serving or mutating operational state, even after downtime. Preview requests do not allocate spaces.
-
-The routing domain excludes every hard-closed physical road, respects imported one-way directions, and keeps incoming-edge state to enforce node-based turn restrictions. Its search uses a zero heuristic (Dijkstra). Haversine distances and OSM/class-derived speed estimates produce approximate travel times; there is no live traffic feed. Freshness cost scales by distance so OSM shape-point density cannot distort it. ML cannot reopen a hard closure, and startup rejects an approved-model setting because no validated inference adapter exists yet.
-
-Route validity is a prototype contract against recorded pilot conditions, not a real-world safety certificate. The client shows when those conditions were last changed and flags an age above 30 minutes. No satellite stream or predictive fire spread is claimed. Routes stop at the nearest mapped road point to a demonstration assembly site; building access is not verified.
-
-## Real-world map data
-
-The packaged extract was acquired from the official OpenStreetMap bounding-box API after public Overpass endpoints timed out. Its provenance, licence, raw-source SHA-256, acquisition time, and full reconstruction command are documented in [the data README](services/api/src/werms_api/data/README.md). The graph is served through `/api/v1/network`; ordinary route requests use this local extract, not an external directions API.
-
-Leaflet requests only normal visible-viewport tiles from OpenStreetMap, with attribution, browser caching, and no bulk prefetch/offline tile download. `VITE_MAP_TILE_URL` allows a different compatible raster provider. Tile outages display a status message while the imported road overlay remains available. Road imports filter private/prohibited access, construction, conditional rules, and unsupported complex turn maneuvers conservatively; they are not a replacement for a fully validated navigation engine.
-
-The three initial demonstration destinations are the OSM-mapped Palisades Branch Los Angeles Public Library, Palisades Recreation Center, and Palisades Charter High School. Their capacities are synthetic and their current operation/suitability is not verified. © OpenStreetMap contributors; the included road/place derivative is distributed under ODbL 1.0.
-
-## Verification
+## Verification and measurement
 
 ```powershell
 ./scripts/verify.ps1
 ```
 
-The checks cover API contracts, role/site permissions, session revocation and throttling, incident transitions, concurrent resource allocation, preview/confirmation separation, graph/path agreement, idempotent confirmations/check-in, expiry, atomic replacement rollback, restart durability, unsupported origins, and controlled no-route outcomes. Frontend tests verify backend path rendering, confirmation recovery, outage behavior, closure invalidation, expiry, cancellation, staff sign-in, scoped site controls, and dispatch retries. The verification script also runs lint and a production web build. Each verification run gets a fresh ignored workspace temporary directory to avoid Windows ownership conflicts. Vitest uses process workers because thread workers time out on this workstation.
+The checks cover causal windows, split separation, saved-model inference parity, A* optimality against exhaustive search, hard exclusions, capacity/concurrency, idempotency, outage behavior, role scope, booking recovery and frontend interactions. A real PostGIS integration test runs when `WERMS_TEST_SPATIAL_URL` is supplied; it is otherwise explicitly skipped.
 
-Use [the demonstration guide](docs/demo-guide.md) for a repeatable end-to-end project presentation. The [release scope](docs/release-scope.md) records what is implemented and which research claims still require evidence.
+The [A* benchmark](docs/benchmarks/dehradun-astar.json) records 60 warm sequential planner calls, 180 destination routes, median **131.34 ms**, p95 **164.32 ms**, and zero blocked-edge violations in three disruption checks. These are local planner measurements, not HTTP load, throughput or safety certification. The earlier Dijkstra benchmark remains historical evidence. [Demo guide](docs/demo-guide.md), [portfolio walkthrough](docs/portfolio-guide.md), and [release scope](docs/release-scope.md) describe the implemented boundaries.
 
-## Containers and persistence
+## Data, services and deployment limits
 
-`docker compose up --build` runs the pilot API and web app with a `pilot-data` volume mounted at `/app/data/operational`. The non-root API container has a writable operational directory. The OSM JSON extract is included in the installed Python package. PostGIS and Redis are retained under the optional `spatial` Compose profile; they are not adapters used by this milestone.
+Road provenance/reconstruction is in the [data README](services/api/src/werms_api/data/README.md). © OpenStreetMap contributors, ODbL 1.0; OpenFreeMap/OpenMapTiles attribution remains visible. The mapped Scholars Home School, Central Park and Dehradun Zoo destinations are demonstration assembly sites with synthetic capacity, not verified emergency shelters. No live traffic, satellite-fire, FSI/ISRO/NDMA integration or endorsement is claimed.
 
-Container execution has not been verified on this workstation because Docker is unavailable. For remote hosting, configure browser-visible API/WebSocket build URLs, the actual `WEB_ORIGIN`, HTTPS, and persistent storage. Use one pilot instance; do not give replicas separate SQLite files.
+Open-Meteo's free hosted endpoint is subject to its [non-commercial terms](https://open-meteo.com/en/terms). Supply appropriate paid access through `WEATHER_API_KEY`, or disable weather, for uses outside those terms. Provider outages never become invented low-risk forecasts.
 
-To back up this milestone, stop the API cleanly and copy the SQLite file to a protected location. Restore while the API is stopped. Protect the operator key separately. Database schema version 1 is initialized automatically; a different road version requires an explicit migration rather than silently reseeding occupied shelters.
-
-## Repository
-
-```text
-apps/web/       React/TypeScript application
-services/api/   FastAPI, routing domain, shared network, transactional operations
-ml/             Future reproducible training plane
-docs/           Requirements, planning history, architecture decisions
-```
-
-## Next milestones
-
-1. Additional pilot areas and a PostGIS adapter with versioned migrations.
-2. Fire/weather ingestion with provenance, validation, replay, and a justified freshness policy.
-3. Validated baseline predictive models, calibration, model cards, and explicit artifact approval.
-4. Realistic scenario benchmarks, accessibility/user evaluation, deployment hardening, and an evidence-based novelty investigation.
-
-The earlier seven-day plan is retained in `docs/final-project-plan.md` as a planning snapshot. The user has removed the deadline constraint; implementation now follows verified milestones.
+Compose now wires a PostGIS service and read-only model-artifact mount into the API; Redis remains optional and unused. The CPU inference image is configured, but **container execution has not been verified because Docker is absent**. Native Windows execution is tested. Production still needs authoritative India hazard/weather histories, geographic model validation, verified shelters, external security/user evaluation, operational deployment hardening and a prior-art investigation. Patentability and real evacuation safety are not established.

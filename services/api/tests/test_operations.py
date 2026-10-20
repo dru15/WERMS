@@ -3,7 +3,6 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-
 from werms_api.network import build_demo_network
 from werms_api.operations import OperationError, Operations
 from werms_api.schemas import ConfirmRouteRequest, RouteRequest

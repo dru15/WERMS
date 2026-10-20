@@ -4,7 +4,6 @@ from uuid import uuid4
 
 import httpx
 import pytest
-
 from werms_api.command import CommandDesk
 from werms_api.config import Settings
 from werms_api.identity import Identity

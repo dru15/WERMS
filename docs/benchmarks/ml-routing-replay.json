@@ -1,0 +1,93 @@
+{
+  "mode": "historical-research-replay",
+  "creates_booking": false,
+  "model_version": "firecastrl-42-20261020T164258",
+  "reference_date": "2018-10-21",
+  "model": "boosted",
+  "cohort_probability": 0.7440380812410143,
+  "origin_node_id": "osm-122838594",
+  "node_ids": [
+    "osm-122838594",
+    "osm-540018221",
+    "osm-7335858705",
+    "osm-122648022",
+    "osm-7335858700",
+    "osm-122648024",
+    "osm-7335858696",
+    "osm-7929859198",
+    "osm-7962066875",
+    "osm-247815122",
+    "osm-540022101"
+  ],
+  "baseline": {
+    "node_ids": [
+      "osm-122838594",
+      "osm-540018221",
+      "osm-7335858705",
+      "osm-122648022",
+      "osm-7335858700",
+      "osm-122648024",
+      "osm-7335858696",
+      "osm-7929859198",
+      "osm-7962066875",
+      "osm-247815122",
+      "osm-540022101"
+    ],
+    "edge_ids": [
+      "osm-way-13341596-5",
+      "osm-way-13341596-6",
+      "osm-way-13341596-7",
+      "osm-way-43103537-0",
+      "osm-way-43103537-1",
+      "osm-way-390152905-0",
+      "osm-way-390152905-1",
+      "osm-way-853629822-0",
+      "osm-way-853629822-1",
+      "osm-way-853629822-2"
+    ],
+    "shelter_id": "demo-way-22988371",
+    "distance_km": 0.5016430000000001,
+    "estimated_minutes": 1.433264,
+    "total_cost": 1.4724816655047768
+  },
+  "spatial_engine": "PostGIS ST_Intersects",
+  "projected_segments": 508,
+  "covered_route_segments": 10,
+  "unscored_route_segments": 0,
+  "road_version": "osm-palisades-7d69f75875e1",
+  "edge_ids": [
+    "osm-way-13341596-5",
+    "osm-way-13341596-6",
+    "osm-way-13341596-7",
+    "osm-way-43103537-0",
+    "osm-way-43103537-1",
+    "osm-way-390152905-0",
+    "osm-way-390152905-1",
+    "osm-way-853629822-0",
+    "osm-way-853629822-1",
+    "osm-way-853629822-2"
+  ],
+  "shelter_id": "demo-way-22988371",
+  "distance_km": 0.5016430000000001,
+  "estimated_minutes": 1.433264,
+  "total_cost": 2.592206151068735,
+  "hazard_version": "hazard-1",
+  "snapshot_timestamp": "2026-10-20T17:08:21.632939+00:00",
+  "scope": "Historical model score on current demonstration road and capacity snapshot",
+  "reason_codes": [
+    "HARD_HAZARDS_EXCLUDED",
+    "CAPACITY_QUALIFIED_SHELTER",
+    "SOFT_RISK_PENALTY_APPLIED",
+    "HISTORICAL_ML_REPLAY",
+    "UNSCORED_ROADS_ARE_UNKNOWN"
+  ],
+  "interpretation": "3 km experimental support neighbourhood (not a measured grid footprint); soft exposure penalty, not a route-safety probability",
+  "case": {
+    "id": "f1e80f5c7d52eff0c4bd",
+    "latitude": 34.0571689991243,
+    "longitude": -118.554478,
+    "reference_date": "2018-10-21",
+    "cohort": "unused",
+    "purpose": "Spatial routing plumbing replay; excluded from reported evaluation metrics"
+  }
+}

@@ -20,3 +20,7 @@ _Avoid_: guaranteed safe route
 
 **Demonstration assembly site**: A mapped landmark used as a destination to exercise capacity and arrival workflows. Its emergency suitability, access, and current operation have not been verified.
 _Avoid_: official shelter, certified safe destination
+
+**What-if scenario**: A hypothetical change to recorded road or destination availability, used to compare possible outcomes without changing actual operational conditions or reservations.
+
+**Model weather context**: Provider-generated weather estimates for a geographic area and validity time. Context is separate from local station readings, fire detections, and evacuation restrictions.

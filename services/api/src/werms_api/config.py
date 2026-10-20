@@ -23,7 +23,11 @@ class Settings(BaseSettings):
     route_validity_seconds: int = Field(default=300, ge=30, le=3600)
     model_mode: Literal["disabled", "approved"] = "disabled"
     model_artifact_path: str = "artifacts/models/approved"
-    operational_db_path: str = "data/operational/palisades.sqlite3"
+    ml_report_path: str | None = None
+    spatial_database_url: SecretStr | None = None
+    operational_db_path: str = "data/operational/dehradun.sqlite3"
+    weather_enabled: bool = True
+    weather_api_key: SecretStr | None = None
     operator_api_key: SecretStr | None = None
 
 

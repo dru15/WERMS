@@ -20,7 +20,32 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services/api/src"))
 
-BOUNDS = (34.039, -118.533, 34.051, -118.514)
+PROFILES = {
+    "dehradun": {
+        "bounds": (30.357, 78.063, 30.391, 78.088),
+        "name": "Rajpur–Malsi, Dehradun",
+        "region": "Uttarakhand, India",
+        "country": "IN",
+        "timezone": "Asia/Kolkata",
+        "origins": [
+            ("Rajpur Road neighbourhood", 30.382, 78.080),
+            ("Malsi neighbourhood", 30.387, 78.074),
+            ("Jakhan neighbourhood", 30.367, 78.073),
+        ],
+    },
+    "palisades": {
+        "bounds": (34.039, -118.533, 34.051, -118.514),
+        "name": "Pacific Palisades, Los Angeles",
+        "region": "California, United States",
+        "country": "US",
+        "timezone": "America/Los_Angeles",
+        "origins": [
+            ("Palisades Village area", 34.0477, -118.5255),
+            ("Sunset Boulevard area", 34.0446, -118.515),
+            ("Temescal Canyon Road area", 34.0427, -118.5311),
+        ],
+    },
+}
 ENDPOINT = "https://overpass-api.de/api/interpreter"
 ROAD_CLASSES = {
     "motorway": 80,
@@ -40,14 +65,15 @@ ROAD_CLASSES = {
 }
 
 
-def query() -> str:
-    bbox = ",".join(map(str, BOUNDS))
+def query(profile_name: str = "dehradun") -> str:
+    bbox = ",".join(map(str, PROFILES[profile_name]["bounds"]))
     classes = "|".join(ROAD_CLASSES)
     return f"""[out:json][timeout:60];(
       way["highway"~"^({classes})$"]({bbox});
       relation["type"="restriction"]({bbox});
-      nwr["amenity"~"^(school|library|community_centre)$"]({bbox});
-      nwr["leisure"="park"]({bbox});
+      nwr["amenity"~"^(school|college|library|community_centre|hospital|place_of_worship)$"]({bbox});
+      nwr["leisure"~"^(park|sports_centre)$"]({bbox});
+      nwr["tourism"="attraction"]({bbox});
     );out body center;>;out skel qt;"""
 
 
@@ -55,10 +81,7 @@ def distance_km(a: dict, b: dict) -> float:
     lat1, lat2 = math.radians(a["lat"]), math.radians(b["lat"])
     dlat = lat2 - lat1
     dlon = math.radians(b["lon"] - a["lon"])
-    chord = (
-        math.sin(dlat / 2) ** 2
-        + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
-    )
+    chord = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
     return 6371.0088 * 2 * math.asin(min(1, math.sqrt(chord)))
 
 
@@ -71,7 +94,11 @@ def speed(tags: dict) -> tuple[float, str]:
     return ROAD_CLASSES[tags["highway"]], "road-class-assumption"
 
 
-def compile_network(raw: dict, digest: str, selected_sites: list[str]) -> dict:
+def compile_network(
+    raw: dict, digest: str, selected_sites: list[str], profile_name: str = "dehradun"
+) -> dict:
+    profile = PROFILES[profile_name]
+    bounds = profile["bounds"]
     elements = {}
     for entry in raw["elements"]:
         elements.setdefault((entry["type"], entry["id"]), {}).update(entry)
@@ -80,26 +107,15 @@ def compile_network(raw: dict, digest: str, selected_sites: list[str]) -> dict:
     excluded_ways = set()
     restrictions = []
     for relation in elements.values():
-        if (
-            relation["type"] != "relation"
-            or relation.get("tags", {}).get("type") != "restriction"
-        ):
+        if relation["type"] != "relation" or relation.get("tags", {}).get("type") != "restriction":
             continue
         tags = relation["tags"]
-        if {"motorcar", "motor_vehicle", "vehicle"} & set(
-            tags.get("except", "").split(";")
-        ):
+        if {"motorcar", "motor_vehicle", "vehicle"} & set(tags.get("except", "").split(";")):
             continue
         members = relation.get("members", [])
-        from_ways = [
-            m["ref"] for m in members if m["role"] == "from" and m["type"] == "way"
-        ]
-        to_ways = [
-            m["ref"] for m in members if m["role"] == "to" and m["type"] == "way"
-        ]
-        via_nodes = [
-            m["ref"] for m in members if m["role"] == "via" and m["type"] == "node"
-        ]
+        from_ways = [m["ref"] for m in members if m["role"] == "from" and m["type"] == "way"]
+        to_ways = [m["ref"] for m in members if m["role"] == "to" and m["type"] == "way"]
+        via_nodes = [m["ref"] for m in members if m["role"] == "via" and m["type"] == "node"]
         restriction = tags.get(
             "restriction:motorcar",
             tags.get("restriction:motor_vehicle", tags.get("restriction", "")),
@@ -131,11 +147,7 @@ def compile_network(raw: dict, digest: str, selected_sites: list[str]) -> dict:
         ):
             continue
         access = next(
-            (
-                tags[k]
-                for k in ["motorcar", "motor_vehicle", "vehicle", "access"]
-                if k in tags
-            ),
+            (tags[k] for k in ["motorcar", "motor_vehicle", "vehicle", "access"] if k in tags),
             "yes",
         )
         if access in {
@@ -177,8 +189,7 @@ def compile_network(raw: dict, digest: str, selected_sites: list[str]) -> dict:
                 continue
             a, b = points[a_id], points[b_id]
             if not all(
-                BOUNDS[0] <= p["lat"] <= BOUNDS[2]
-                and BOUNDS[1] <= p["lon"] <= BOUNDS[3]
+                bounds[0] <= p["lat"] <= bounds[2] and bounds[1] <= p["lon"] <= bounds[3]
                 for p in [a, b]
             ):
                 continue
@@ -210,8 +221,8 @@ def compile_network(raw: dict, digest: str, selected_sites: list[str]) -> dict:
             "id": f"osm-{i}",
             "latitude": points[i]["lat"],
             "longitude": points[i]["lon"],
-            "x": (points[i]["lon"] - BOUNDS[1]) / (BOUNDS[3] - BOUNDS[1]) * 940,
-            "y": (BOUNDS[2] - points[i]["lat"]) / (BOUNDS[2] - BOUNDS[0]) * 620,
+            "x": (points[i]["lon"] - bounds[1]) / (bounds[3] - bounds[1]) * 940,
+            "y": (bounds[2] - points[i]["lat"]) / (bounds[2] - bounds[0]) * 620,
         }
         for i in sorted(used)
     ]
@@ -219,17 +230,24 @@ def compile_network(raw: dict, digest: str, selected_sites: list[str]) -> dict:
     def nearest(point):
         return min(
             nodes,
-            key=lambda n: distance_km(
-                point, {"lat": n["latitude"], "lon": n["longitude"]}
-            ),
+            key=lambda n: distance_km(point, {"lat": n["latitude"], "lon": n["longitude"]}),
         )
 
     pois = []
     for e in elements.values():
         tags = e.get("tags", {})
         if "name" in tags and (
-            tags.get("amenity") in {"school", "library", "community_centre"}
-            or tags.get("leisure") == "park"
+            tags.get("amenity")
+            in {
+                "school",
+                "college",
+                "library",
+                "community_centre",
+                "hospital",
+                "place_of_worship",
+            }
+            or tags.get("leisure") in {"park", "sports_centre"}
+            or tags.get("tourism") == "attraction"
         ):
             point = e.get("center", e)
             if "lat" not in point and e["type"] == "way":
@@ -240,7 +258,7 @@ def compile_network(raw: dict, digest: str, selected_sites: list[str]) -> dict:
                         "lon": sum(p["lon"] for p in vertices) / len(vertices),
                     }
             if "lat" in point and "lon" in point:
-                pois.append((tags["name"], point, e))
+                pois.append((tags.get("name:en", tags["name"]), point, e))
     if not selected_sites:
         print("Available mapped places:")
         for name, point, e in sorted(pois, key=lambda p: p[0]):
@@ -253,10 +271,7 @@ def compile_network(raw: dict, digest: str, selected_sites: list[str]) -> dict:
             raise ValueError(f"Mapped place not found: {name}")
         _, point, element = poi
         node = nearest(point)
-        snap = (
-            distance_km(point, {"lat": node["latitude"], "lon": node["longitude"]})
-            * 1000
-        )
+        snap = distance_km(point, {"lat": node["latitude"], "lon": node["longitude"]}) * 1000
         if snap > 250:
             raise ValueError(f"Mapped place has no nearby road access: {name}")
         shelters.append(
@@ -274,11 +289,7 @@ def compile_network(raw: dict, digest: str, selected_sites: list[str]) -> dict:
             }
         )
     origins = []
-    for label, lat, lon in [
-        ("Palisades Village area", 34.0477, -118.5255),
-        ("Sunset Boulevard area", 34.0446, -118.515),
-        ("Temescal Canyon Road area", 34.0427, -118.5311),
-    ]:
+    for label, lat, lon in profile["origins"]:
         origins.append({"name": label, "node": nearest({"lat": lat, "lon": lon})["id"]})
     graph_digest = hashlib.sha256(
         json.dumps(
@@ -293,10 +304,14 @@ def compile_network(raw: dict, digest: str, selected_sites: list[str]) -> dict:
         ).encode()
     ).hexdigest()
     return {
-        "version": f"osm-palisades-{graph_digest[:12]}",
-        "name": "Pacific Palisades, Los Angeles",
+        "version": f"osm-{profile_name}-{graph_digest[:12]}",
+        "name": profile["name"],
+        "region": profile["region"],
+        "country": profile["country"],
+        "timezone": profile["timezone"],
+        "profile": profile_name,
         "data_mode": "osm-pilot",
-        "bounds": list(BOUNDS),
+        "bounds": list(bounds),
         "nodes": nodes,
         "roads": roads,
         "shelters": shelters,
@@ -310,7 +325,7 @@ def compile_network(raw: dict, digest: str, selected_sites: list[str]) -> dict:
             "endpoint": ENDPOINT,
             "data_timestamp": raw.get("osm3s", {}).get("timestamp_osm_base"),
             "sha256": digest,
-            "query": query(),
+            "query": query(profile_name),
             "imported_at": datetime.now(UTC).isoformat(),
             "excluded_complex_restriction_ways": len(excluded_ways),
         },
@@ -321,6 +336,7 @@ def compile_network(raw: dict, digest: str, selected_sites: list[str]) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--profile", choices=PROFILES, default="dehradun")
     parser.add_argument("--fetch", action="store_true")
     parser.add_argument("--endpoint", default=ENDPOINT)
     parser.add_argument(
@@ -328,19 +344,21 @@ def main():
     )
     parser.add_argument("--site", action="append", default=[])
     args = parser.parse_args()
-    raw_path = ROOT / "data/raw/palisades-osm.json"
+    raw_path = ROOT / f"data/raw/{args.profile}-osm.json"
     if args.fetch:
         request = Request(
             args.endpoint,
-            data=urlencode({"data": query()}).encode(),
+            data=urlencode({"data": query(args.profile)}).encode(),
             headers={
                 "User-Agent": "WERMS/0.3 (+https://github.com/dru15/WERMS)",
                 "Content-Type": "application/x-www-form-urlencoded",
             },
         )
         if args.osm_api:
-            south, west, north, east = BOUNDS
-            args.endpoint = f"https://api.openstreetmap.org/api/0.6/map.json?bbox={west},{south},{east},{north}"
+            south, west, north, east = PROFILES[args.profile]["bounds"]
+            args.endpoint = (
+                f"https://api.openstreetmap.org/api/0.6/map.json?bbox={west},{south},{east},{north}"
+            )
             request = Request(
                 args.endpoint,
                 headers={
@@ -365,9 +383,7 @@ def main():
                     chunks.append(chunk)
                     total += len(chunk)
                     if total > 20_000_000 or time.monotonic() > deadline:
-                        raise ValueError(
-                            "Bounded download exceeded its size or duration limit."
-                        )
+                        raise ValueError("Bounded download exceeded its size or duration limit.")
                     if len(chunks) % 16 == 0:
                         print(f"Received {total // 1024} KiB", flush=True)
                 payload = b"".join(chunks)
@@ -395,22 +411,18 @@ def main():
     raw = json.loads(payload)
     if raw.get("remark"):
         raise ValueError(raw["remark"])
-    graph = compile_network(raw, hashlib.sha256(payload).hexdigest(), args.site)
+    graph = compile_network(raw, hashlib.sha256(payload).hexdigest(), args.site, args.profile)
     if graph:
-        graph["source"].update(
-            json.loads(raw_path.with_suffix(".meta.json").read_text())
-        )
+        graph["source"].update(json.loads(raw_path.with_suffix(".meta.json").read_text()))
         if not graph["source"]["data_timestamp"]:
             graph["source"]["data_timestamp"] = graph["source"]["downloaded_at"]
             graph["source"]["timestamp_mode"] = "download-time"
         if "api.openstreetmap.org/api/0.6/map" in graph["source"]["endpoint"]:
             graph["source"].pop("query", None)
             graph["source"]["request_format"] = "OSM API 0.6 JSON bounding-box request"
-        destination = ROOT / "services/api/src/werms_api/data/palisades-network.json"
+        destination = ROOT / f"services/api/src/werms_api/data/{args.profile}-network.json"
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(
-            json.dumps(graph, separators=(",", ":")) + "\n", encoding="utf-8"
-        )
+        destination.write_text(json.dumps(graph, separators=(",", ":")) + "\n", encoding="utf-8")
         print(
             f"Imported {len(graph['nodes'])} nodes, {len(graph['roads'])} roads, "
             f"{len(graph['turn_restrictions'])} turn restrictions; {destination}"

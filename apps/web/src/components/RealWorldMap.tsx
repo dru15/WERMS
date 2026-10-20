@@ -1,146 +1,190 @@
 import { useEffect, useRef, useState } from "react";
-import * as L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import { Map as VectorMap, Marker, NavigationControl, ScaleControl, setWorkerUrl,
+  type GeoJSONSource, type StyleSpecification } from "maplibre-gl";
+import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
+import "maplibre-gl/dist/maplibre-gl.css";
 import { closestRoadNode, type Network, type Plan } from "../network";
+import { roadFeatures, routeFeatures } from "../mapData";
+import type { FirePolygon } from "../context";
 
+setWorkerUrl(workerUrl);
+const EMPTY: string[] = [];
+const EMPTY_RISK: Record<string,number> = {};
+const VECTOR_STYLE = import.meta.env.VITE_MAP_STYLE_URL ?? "https://tiles.openfreemap.org/styles/liberty";
+const LOCAL_STYLE: StyleSpecification = { version: 8, sources: {}, layers: [
+  { id: "background", type: "background", paint: { "background-color": "#edf1e5" } },
+] };
 export type RealWorldMapProps = {
   network: Network; plan?: Plan; blocked?: string[]; origin?: string; progress?: number;
   invalid?: boolean; onRoad?: (id: string) => void; onShelter?: (id: string) => void;
-  onOrigin?: (id: string) => void;
+  onOrigin?: (id: string) => void; comparisonPlan?: Plan; scenarioBlocked?: string[];
+  firePolygon?: FirePolygon;
+  riskScores?:Record<string,number>;
 };
 
-function label(text: string) { const element = document.createElement("span"); element.textContent = text; return element; }
-function coordinate(point: { latitude?: number; longitude?: number }): L.LatLngTuple {
-  if (point.latitude === undefined || point.longitude === undefined) throw new Error("Mapped point needs real coordinates.");
-  return [point.latitude, point.longitude];
-}
-
-export function RealWorldMap({ network, plan, blocked = [], origin, progress = 0, invalid = false,
-  onRoad, onShelter, onOrigin }: RealWorldMapProps) {
-  const container = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<L.Map | undefined>(undefined);
-  const roadsRef = useRef<L.LayerGroup | undefined>(undefined);
-  const routeRef = useRef<L.LayerGroup | undefined>(undefined);
-  const sitesRef = useRef<L.LayerGroup | undefined>(undefined);
-  const markerRef = useRef<L.CircleMarker | undefined>(undefined);
-  const fittedPath = useRef("");
+export function RealWorldMap(props: RealWorldMapProps) {
+  const { network, plan, blocked = EMPTY, origin, progress = 0, invalid = false,
+    onRoad, onShelter, onOrigin, comparisonPlan, scenarioBlocked = EMPTY, firePolygon, riskScores=EMPTY_RISK } = props;
+  const container = useRef<HTMLDivElement>(null), mapRef = useRef<VectorMap | undefined>(undefined);
   const handlers = useRef({ onRoad, onShelter, onOrigin });
-  const [showRoads, setShowRoads] = useState(true);
-  const [showSites, setShowSites] = useState(true);
-  const [tileError, setTileError] = useState(false);
-  const [selectionMessage, setSelectionMessage] = useState("Select a road inside the pilot boundary to set your starting point.");
+  const [showRoads, setShowRoads] = useState(true), [showSites, setShowSites] = useState(true);
+  const [ready, setReady] = useState(0), [basemap, setBasemap] = useState("loading");
+  const [retry, setRetry] = useState(0);
+  const [message, setMessage] = useState("Select a road inside the pilot boundary to set your starting point.");
+  const fitted = useRef("");
   const operator = Boolean(onRoad);
-
   useEffect(() => { handlers.current = { onRoad, onShelter, onOrigin }; }, [onRoad, onShelter, onOrigin]);
+
   useEffect(() => {
     if (!container.current || !network.bounds) return;
-    const [south, west, north, east] = network.bounds;
-    const map = L.map(container.current, { scrollWheelZoom: false, zoomControl: true, preferCanvas: true });
+    const [s, w, n, e] = network.bounds;
+    let map: VectorMap;
+    try {
+      map = new VectorMap({ container: container.current, style: LOCAL_STYLE, attributionControl: false,
+        bounds: [[w, s], [e, n]], fitBoundsOptions: { padding: 35 }, maxZoom: 20,
+        canvasContextAttributes: { antialias: true }, scrollZoom: false });
+    } catch {
+      container.current.textContent = "This device cannot initialize the WebGL map. Route details remain available below.";
+      return;
+    }
     mapRef.current = map;
-    map.fitBounds([[south, west], [north, east]], { padding: [16, 16] });
-    const tileUrl = import.meta.env.VITE_MAP_TILE_URL ?? "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
-    const tiles = L.tileLayer(tileUrl, { maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      updateWhenIdle: true, keepBuffer: 1 }).addTo(map);
-    tiles.on("tileerror", () => setTileError(true));
-    L.control.scale({ imperial: false }).addTo(map);
-    L.rectangle([[south, west], [north, east]], { color: "#546c5d", weight: 2,
-      dashArray: "6 6", fill: false, interactive: false }).addTo(map);
-    roadsRef.current = L.layerGroup().addTo(map);
-    routeRef.current = L.layerGroup().addTo(map);
-    sitesRef.current = L.layerGroup().addTo(map);
-    const chooser = (event: L.LeafletMouseEvent) => {
-      const nearest = closestRoadNode(network, event.latlng.lat, event.latlng.lng);
-      if (!nearest) { setSelectionMessage("Choose a mapped road within the dashed pilot boundary, within 200 m of the network."); return; }
+    map.addControl(new NavigationControl({ visualizePitch: true }), "top-right");
+    map.addControl(new ScaleControl({ unit: "metric" }));
+    map.on("idle", () => {
+      const ownSources = new Set(["roads","route","comparison","pilot-boundary","fire-perimeter","local-context"]);
+      const geographicFeatures = map.queryRenderedFeatures().filter(feature => !ownSources.has(feature.source));
+      if (geographicFeatures.length) setBasemap("vector");
+    });
+    map.on("error", () => setBasemap("unavailable"));
+    map.on("style.load", () => {
+      map.addSource("local-context", {type:"geojson",data:network.context ?? {type:"FeatureCollection",features:[]}});
+      map.addLayer({id:"local-land",type:"fill",source:"local-context",filter:["==",["geometry-type"],"Polygon"],paint:{"fill-color":["match",["get","kind"],"water","#bdd8df","building","#d7dbd0","#d8e6c9"],"fill-opacity":.9}});
+      map.addLayer({id:"local-water",type:"line",source:"local-context",filter:["==",["geometry-type"],"LineString"],paint:{"line-color":"#a7cbd5","line-width":2}});
+      map.addSource("pilot-boundary", { type: "geojson", data: { type: "Feature", properties: {},
+        geometry: { type: "LineString", coordinates: [[w, s], [e, s], [e, n], [w, n], [w, s]] } } });
+      map.addLayer({ id: "pilot-boundary", type: "line", source: "pilot-boundary",
+        paint: { "line-color": "#426959", "line-width": 2, "line-dasharray": [3, 3] } });
+      map.addSource("fire-perimeter", {type:"geojson", data:{type:"FeatureCollection",features:[]}});
+      map.addLayer({id:"fire-perimeter",type:"fill",source:"fire-perimeter",paint:{"fill-color":"#df5b31","fill-opacity":.25}});
+      map.addLayer({id:"fire-boundary",type:"line",source:"fire-perimeter",paint:{"line-color":"#c43d32","line-width":2,"line-dasharray":[3,2]}});
+      for (const id of ["roads", "route", "comparison"]) {
+        map.addSource(id, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+      }
+      map.addLayer({ id: "roads", source: "roads", type: "line", paint: {
+        "line-color": ["case", ["get", "closed"], "#c43d32", ["get", "simulated"], "#d97706", ["has","predictive_risk"], ["interpolate",["linear"],["get","predictive_risk"],0,"#c9ac50",1,"#a33c29"], "#356d99"],
+        "line-width": ["case", ["any", ["get", "closed"], ["get", "simulated"]], 6, 2],
+        "line-opacity": ["case", ["any", ["get", "closed"], ["get", "simulated"], ["has","predictive_risk"]], .85, .25],
+      } });
+      map.addLayer({ id: "road-hit", source: "roads", type: "line", paint: { "line-width": 16, "line-opacity": 0 } });
+      map.addLayer({ id: "comparison", source: "comparison", type: "line", paint: {
+        "line-color": "#705c89", "line-width": 5, "line-dasharray": [3, 2], "line-opacity": .8 } });
+      map.addLayer({ id: "route-halo", source: "route", type: "line", paint: { "line-color": "white", "line-width": 9 } });
+      map.addLayer({ id: "route", source: "route", type: "line", paint: { "line-color": "#1769e0", "line-width": 5 } });
+      setReady(x => x + 1);
+    });
+    map.on("click", event => {
+      const hit = map.getLayer("road-hit") ? map.queryRenderedFeatures(event.point, { layers: ["road-hit"] })[0] : undefined;
+      if (handlers.current.onRoad && hit?.properties?.id) { handlers.current.onRoad(String(hit.properties.id)); return; }
+      if (!handlers.current.onOrigin) return;
+      const nearest = closestRoadNode(network, event.lngLat.lat, event.lngLat.lng);
+      if (!nearest) { setMessage("Choose a mapped road inside the pilot boundary, within 200 m of the network."); return; }
       handlers.current.onOrigin?.(nearest.id);
-      setSelectionMessage(`Starting point: ${nearest.latitude?.toFixed(5)}, ${nearest.longitude?.toFixed(5)}.`);
-    };
-    map.on("click", chooser);
-    const observer = new ResizeObserver(() => map.invalidateSize({ pan: false }));
+      setMessage(`Starting point: ${nearest.latitude?.toFixed(5)}, ${nearest.longitude?.toFixed(5)}.`);
+    });
+    const observer = new ResizeObserver(() => map.resize());
     observer.observe(container.current);
-    return () => { observer.disconnect(); map.remove(); mapRef.current = undefined;
-      roadsRef.current = undefined; sitesRef.current = undefined; routeRef.current = undefined; markerRef.current = undefined; fittedPath.current = ""; };
+    return () => { observer.disconnect(); map.remove(); mapRef.current = undefined; fitted.current = ""; };
   }, [network]);
 
   useEffect(() => {
-    const group = roadsRef.current, map = mapRef.current;
-    if (!group || !map) return;
-    group.clearLayers();
-    const points = Object.fromEntries(network.nodes.map(n => [n.id, n]));
-    for (const road of network.roads) {
-      const closed = blocked.includes(road.id);
-      if (!showRoads && !closed) continue;
-      const line = L.polyline([coordinate(points[road.from]), coordinate(points[road.to])], {
-        color: closed ? "#c43d32" : "#356d99", weight: closed ? 6 : 4,
-        opacity: closed ? 0.95 : operator ? 0.45 : 0.18,
-        dashArray: closed ? "8 5" : undefined, interactive: operator,
-      }).addTo(group);
-      if (operator) {
-        line.bindTooltip(label(`${road.name} · ${closed ? "Closed: select to reopen" : "Select to close"}`));
-        line.on("click", event => { if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent);
-          handlers.current.onRoad?.(road.id); });
-      }
-    }
-  }, [network, blocked, showRoads, operator]);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    fetch(VECTOR_STYLE, { signal: controller.signal }).then(async response => {
+      if (!response.ok) throw new Error("Provider unavailable");
+      const style = await response.json() as StyleSpecification;
+      if (style.version !== 8 || !style.sources || !Array.isArray(style.layers)) throw new Error("Invalid style");
+      mapRef.current?.setStyle(style);
+    }).catch(() => { if (!controller.signal.aborted || mapRef.current) setBasemap("unavailable"); })
+      .finally(() => clearTimeout(timeout));
+    return () => { controller.abort(); clearTimeout(timeout); };
+  }, [network, retry]);
 
   useEffect(() => {
-    const group = sitesRef.current;
-    if (!group) return;
-    group.clearLayers();
-    if (!showSites) return;
-    for (const site of network.shelters) {
-      const marker = L.marker(coordinate(site), { icon: L.divIcon({ className: "assembly-marker",
-        html: '<span aria-hidden="true">A</span>', iconSize: [30, 30], iconAnchor: [15, 15] }),
-        title: `Demo assembly site: ${site.name}`, keyboard: true }).addTo(group);
-      marker.bindTooltip(label(`${site.name} · demonstration assembly site`));
-      marker.on("click", () => handlers.current.onShelter?.(site.id));
+    const map = mapRef.current;
+    if (!map?.getSource("roads") || !map.getSource("fire-perimeter")) return;
+    const roads = roadFeatures(network, blocked, scenarioBlocked, riskScores);
+    if (!showRoads) roads.features = roads.features.filter(f => f.properties?.closed || f.properties?.simulated);
+    (map.getSource("roads") as GeoJSONSource).setData(roads);
+    (map.getSource("route") as GeoJSONSource).setData(routeFeatures(network, plan));
+    (map.getSource("comparison") as GeoJSONSource).setData(routeFeatures(network, comparisonPlan));
+    (map.getSource("fire-perimeter") as GeoJSONSource).setData({type:"FeatureCollection",features:firePolygon ? [{type:"Feature",properties:{},geometry:firePolygon}] : []});
+    map.setPaintProperty("route", "line-color", invalid ? "#7b8580" : "#1769e0");
+    map.setLayoutProperty("local-land","visibility",basemap==='vector'?'none':'visible');
+    map.setLayoutProperty("local-water","visibility",basemap==='vector'?'none':'visible');
+    map.setPaintProperty("roads","line-opacity",["case",["any",["get","closed"],["get","simulated"],["has","predictive_risk"]],.9,basemap==='vector'?.25:.7]);
+    const signature = (plan?.nodes.join("|") ?? "") + (comparisonPlan?.nodes.join("|") ?? "");
+    if (signature && signature !== fitted.current) {
+      const points = [...routeFeatures(network, plan).features, ...routeFeatures(network, comparisonPlan).features]
+        .flatMap(f => f.geometry.coordinates);
+      if (points.length > 1) map.fitBounds([[Math.min(...points.map(p => p[0])), Math.min(...points.map(p => p[1]))],
+        [Math.max(...points.map(p => p[0])), Math.max(...points.map(p => p[1]))]], { padding: 55, maxZoom: 17, duration: 0 });
+      fitted.current = signature;
     }
-  }, [network, showSites]);
+  }, [network, plan, comparisonPlan, blocked, scenarioBlocked, showRoads, invalid, ready, firePolygon, riskScores, basemap]);
+
+  useEffect(()=>{
+    const map=mapRef.current;
+    if(!map || basemap==='vector' || !showRoads) return;
+    const points=Object.fromEntries(network.nodes.map(n=>[n.id,n]));
+    const names=new Set<string>(),anchors:{lat:number;lon:number}[]=[],labels:Marker[]=[];
+    for(const road of [...network.roads].sort((a,b)=>b.km-a.km)){
+      if(names.has(road.name) || road.name.toLowerCase()===road.highway?.replaceAll('_',' ') || road.km<.03)continue;
+      const a=points[road.from],b=points[road.to],lat=(a.latitude!+b.latitude!)/2,lon=(a.longitude!+b.longitude!)/2;
+      if(anchors.some(p=>Math.hypot((p.lat-lat)*111,(p.lon-lon)*95)<.18))continue;
+      const element=document.createElement('span');element.className='vector-local-label';element.textContent=road.name;element.setAttribute('aria-hidden','true');
+      labels.push(new Marker({element,anchor:'center'}).setLngLat([lon,lat]).addTo(map));names.add(road.name);anchors.push({lat,lon});
+      if(labels.length===10)break;
+    }
+    return()=>labels.forEach(label=>label.remove());
+  },[network,basemap,showRoads,ready]);
 
   useEffect(() => {
-    const group = routeRef.current, map = mapRef.current;
-    if (!group || !map) return;
-    group.clearLayers();
-    const points = Object.fromEntries(network.nodes.map(n => [n.id, n]));
-    if (plan) {
-      const path = plan.nodes.map(id => coordinate(points[id]));
-      L.polyline(path, { color: "white", weight: 9, interactive: false }).addTo(group);
-      L.polyline(path, { color: invalid ? "#7b8580" : "#1769e0", weight: 5,
-        dashArray: invalid ? "8 5" : undefined, interactive: false }).addTo(group);
-      const signature = plan.nodes.join("|");
-      if (path.length > 1 && signature !== fittedPath.current) {
-        map.fitBounds(L.latLngBounds(path).pad(0.25), { maxZoom: 17, animate: false });
-        fittedPath.current = signature;
-      }
-    }
-  }, [network, plan, invalid]);
+    const map = mapRef.current;
+    if (!map || !showSites) return;
+    const markers = network.shelters.map(site => {
+      const element = document.createElement("button"); element.className = "vector-site";
+      element.textContent = "A"; element.title = `Demo assembly site: ${site.name}`;
+      element.setAttribute("aria-label", element.title);
+      element.onclick = event => { event.stopPropagation(); handlers.current.onShelter?.(site.id); };
+      return new Marker({ element }).setLngLat([site.longitude!, site.latitude!]).addTo(map);
+    });
+    return () => markers.forEach(marker => marker.remove());
+  }, [network, showSites, ready]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     const points = Object.fromEntries(network.nodes.map(n => [n.id, n]));
-    let location: L.LatLngTuple | undefined;
-    if (plan?.nodes.length) {
-      const scaled = Math.min(1, Math.max(0, progress)) * (plan.nodes.length - 1);
-      const index = Math.min(Math.floor(scaled), Math.max(0, plan.nodes.length - 2));
-      const a = coordinate(points[plan.nodes[index]]), b = coordinate(points[plan.nodes[Math.min(index + 1, plan.nodes.length - 1)]]);
-      const fraction = scaled - index;
-      location = [a[0] + (b[0] - a[0]) * fraction, a[1] + (b[1] - a[1]) * fraction];
-    } else if (origin && points[origin]) location = coordinate(points[origin]);
-    if (!location) return;
-    if (!markerRef.current) markerRef.current = L.circleMarker(location, { radius: 8, color: "white", weight: 3, fillColor: "#1769e0", fillOpacity: 1, interactive: false }).addTo(map);
-    else markerRef.current.setLatLng(location);
-  }, [network, plan, origin, progress]);
+    const path = plan?.nodes.length ? plan.nodes : origin ? [origin] : [];
+    if (!path.length) return;
+    const scaled = Math.min(1, Math.max(0, progress)) * (path.length - 1), index = Math.floor(scaled);
+    const a = points[path[index]], b = points[path[Math.min(index + 1, path.length - 1)]], f = scaled - index;
+    if (!a || !b) return;
+    const element = document.createElement("div"); element.className = "vector-origin";
+    const marker = new Marker({ element }).setLngLat([a.longitude! + (b.longitude! - a.longitude!) * f,
+      a.latitude! + (b.latitude! - a.latitude!) * f]).addTo(map);
+    return () => { marker.remove(); };
+  }, [network, plan, origin, progress, ready]);
 
   return <section className="map-card real-map-card">
-    <div className="map-toolbar"><div className="map-title"><h2>{network.name}</h2><p>OpenStreetMap roads · select a starting point on the map</p></div>
-      <div className="map-tools"><button className={showRoads ? "map-tool active" : "map-tool"} aria-pressed={showRoads} onClick={() => setShowRoads(s => !s)}>Road network</button><button className={showSites ? "map-tool active" : "map-tool"} aria-pressed={showSites} onClick={() => setShowSites(s => !s)}>Assembly sites</button><button className="map-tool" onClick={() => {
-        if (network.bounds) mapRef.current?.fitBounds([[network.bounds[0], network.bounds[1]], [network.bounds[2], network.bounds[3]]]);
-      }}>Pilot area</button></div>
-    </div>
-    <div className="real-world-map" ref={container} role="region" aria-label="Real-world OpenStreetMap road map" />
-    {tileError && <div className="map-status" role="status">Some basemap tiles are unavailable. The imported road network remains visible.</div>}
-    <div className="map-status" role="status">{operator ? "Operator mode: select a highlighted road to close or reopen it." : selectionMessage}</div>
-    <div className="map-source">Road extract: {network.source?.data_timestamp ? new Date(network.source.data_timestamp).toLocaleDateString() : "OpenStreetMap"} · <a href="https://www.openstreetmap.org/fixthemap" target="_blank" rel="noreferrer">Report a map issue</a> · Assembly sites and closures are demonstration data.</div>
+    <div className="map-toolbar"><div className="map-title"><h2>{network.name}</h2><p>Vector map · crisp at every zoom · {onOrigin ? "select a starting point" : "pan and zoom to inspect"}</p></div>
+      <div className="map-tools"><button className={`map-tool ${showRoads ? "active" : ""}`} aria-pressed={showRoads} onClick={() => setShowRoads(s => !s)}>Road network</button>
+        <button className={`map-tool ${showSites ? "active" : ""}`} aria-pressed={showSites} onClick={() => setShowSites(s => !s)}>Assembly sites</button>
+        <button className="map-tool" onClick={() => { const b = network.bounds; if (b) mapRef.current?.fitBounds([[b[1], b[0]], [b[3], b[2]]], { padding: 35 }); }}>Pilot area</button></div></div>
+    <div className="real-world-map" ref={container} role="region" aria-label="Real-world OpenStreetMap road map" data-basemap={basemap} />
+    {basemap !== "vector" && <div className="map-status" role="status">{basemap === "loading" ? "Loading detailed vector basemap…" : `Online basemap unavailable. Local OSM roads and ${network.context?.features.length ?? 0} mapped context features remain visible inside the pilot.`}
+      {basemap === "unavailable" && <button className="map-tool" onClick={() => { setBasemap("loading"); setRetry(x => x + 1); }}>Retry basemap</button>}</div>}
+    <div className="map-status" role="status">{operator ? "Operator mode: select a highlighted road to close or reopen it." : onOrigin ? message : "Pan and zoom to inspect this scenario. Its starting point is fixed for this comparison."}</div>
+    <div className="map-source"><a href="https://openfreemap.org/" target="_blank" rel="noreferrer">OpenFreeMap</a> · © <a href="https://www.openmaptiles.org/" target="_blank" rel="noreferrer">OpenMapTiles</a> · © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a> · Assembly sites and closures are demonstration data.</div>
   </section>;
 }

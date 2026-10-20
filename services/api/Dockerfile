@@ -6,7 +6,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY pyproject.toml ./
 COPY src ./src
-RUN python -m pip install --no-cache-dir .
+RUN python -m pip install --no-cache-dir torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+RUN python -m pip install --no-cache-dir '.[ml,spatial]'
 RUN mkdir -p /app/data/operational && chown -R 65532:65532 /app/data
 
 USER 65532:65532

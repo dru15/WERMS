@@ -1,7 +1,7 @@
-import { useRef, useState } from "react";
+import { lazy, Suspense, useRef, useState } from "react";
 import { nodes as trainingNodes, roads as trainingRoads, shelters as trainingShelters } from "../simulation";
 import { positionOnNetwork, type Network, type Plan } from "../network";
-import { RealWorldMap } from "./RealWorldMap";
+const RealWorldMap = lazy(() => import("./RealWorldMap").then(m => ({default:m.RealWorldMap})));
 
 type Props = {
   plan?: Plan; blocked?: string[]; origin?: string; progress?: number;
@@ -11,7 +11,7 @@ type Props = {
   onOrigin?: (id: string) => void;
 };
 export function OperationsMap(props: Props) {
-  if (props.network?.data_mode === "osm-pilot") return <RealWorldMap {...props} network={props.network} />;
+  if (props.network?.data_mode === "osm-pilot") return <Suspense fallback={<section className="map-card" role="status">Loading vector map…</section>}><RealWorldMap {...props} network={props.network} /></Suspense>;
   return <TrainingMap {...props} />;
 }
 

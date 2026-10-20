@@ -4,6 +4,7 @@ import { CommandCentre } from "./CommandCentre";
 import { staffApi } from "../staff";
 import type { CommandState } from "../staff";
 import type { Shelter } from "../types";
+vi.mock("./FireExclusionPanel", () => ({FireExclusionPanel: () => null}));
 
 vi.mock("../staff", () => ({ staffApi: { login: vi.fn(), logout: vi.fn(), state: vi.fn(), accounts: vi.fn(), audit: vi.fn(),
   report: vi.fn(), resource: vi.fn(), availability: vi.fn(), dispatch: vi.fn(), assignment: vi.fn(), incident: vi.fn(), shelter: vi.fn(), account: vi.fn() } }));

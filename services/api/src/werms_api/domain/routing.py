@@ -10,12 +10,20 @@ from werms_api.domain.models import (
     CostWeights,
     HazardState,
     NoSafeRouteError,
+    Point,
     RoadEdge,
     RoadNode,
     RoutePlan,
     Shelter,
     ShelterStatus,
 )
+
+
+def _distance_km(a: Point, b: Point) -> float:
+    lat1, lat2 = math.radians(a.latitude), math.radians(b.latitude)
+    dlat, dlon = lat2 - lat1, math.radians(b.longitude - a.longitude)
+    h = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    return 6371.0088 * 2 * math.asin(math.sqrt(min(1.0, max(0.0, h))))
 
 
 def _edge_cost(
@@ -30,8 +38,8 @@ def _edge_cost(
     bounded_age = min(max(data_age_minutes / 30.0, 0.0), 1.0)
     return (
         edge.travel_minutes
-        + weights.live_hazard * edge.live_risk
-        + weights.predictive_risk * edge.predictive_risk
+        + weights.live_hazard * edge.live_risk * edge.distance_km
+        + weights.predictive_risk * edge.predictive_risk * edge.distance_km
         + weights.congestion * edge.congestion
         + weights.data_age * bounded_age * edge.distance_km
     )
@@ -49,8 +57,28 @@ def _astar(
     turn_restrictions: tuple[dict, ...] = (),
 ) -> tuple[tuple[str, ...], tuple[RoadEdge, ...], float] | None:
     adjacency: dict[str, list[RoadEdge]] = defaultdict(list)
+    # Every traversable edge must cost at least this many minutes per straight-line
+    # kilometre. The triangle inequality makes the resulting heuristic consistent,
+    # including on imported graphs with unusual speed estimates or turn restrictions.
+    lower_bound = math.inf
     for edge in edges:
         adjacency[edge.source].append(edge)
+        distance = _distance_km(nodes[edge.source].point, nodes[edge.target].point)
+        cost = _edge_cost(
+            edge,
+            hard_blocked=edge.edge_id in hazard.blocked_edge_ids,
+            data_age_minutes=max(0.0, (now - hazard.source_timestamp).total_seconds() / 60),
+            weights=weights,
+        )
+        if math.isnan(cost) or cost < 0:
+            raise ValueError("A* requires non-negative, non-NaN edge costs.")
+        if distance > 0 and math.isfinite(cost):
+            lower_bound = min(lower_bound, cost / distance)
+    if not math.isfinite(lower_bound):
+        lower_bound = 0.0
+
+    def heuristic(node_id: str) -> float:
+        return lower_bound * _distance_km(nodes[node_id].point, nodes[destination_node_id].point)
 
     rules: dict[str, list[dict]] = defaultdict(list)
     for rule in turn_restrictions:
@@ -58,13 +86,13 @@ def _astar(
     way_by_edge = {edge.edge_id: edge.way_id for group in adjacency.values() for edge in group}
     data_age_minutes = max(0.0, (now - hazard.source_timestamp).total_seconds() / 60.0)
     start = (origin_node_id, "")
-    queue: list[tuple[float, str, str]] = [(0.0, *start)]
+    queue: list[tuple[float, float, str, str]] = [(heuristic(origin_node_id), 0.0, *start)]
     came_from: dict[tuple[str, str], tuple[tuple[str, str], RoadEdge]] = {}
     best_cost = {start: 0.0}
     destination = None
 
     while queue:
-        current_cost, current, incoming_edge = heapq.heappop(queue)
+        _, current_cost, current, incoming_edge = heapq.heappop(queue)
         state = (current, incoming_edge)
         if current_cost > best_cost.get(state, math.inf):
             continue
@@ -109,8 +137,9 @@ def _astar(
                 continue
             best_cost[next_state] = candidate_cost
             came_from[next_state] = (state, edge)
-            # A zero heuristic is admissible for all travel-time graphs.
-            heapq.heappush(queue, (candidate_cost, *next_state))
+            heapq.heappush(
+                queue, (candidate_cost + heuristic(edge.target), candidate_cost, *next_state)
+            )
 
     if destination is None:
         return None
